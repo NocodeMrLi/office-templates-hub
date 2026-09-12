@@ -24,6 +24,7 @@ export interface VerifyCosUploadedAssetsOptions {
   region: string;
   manifest: CosUploadManifest;
   continueOnError?: boolean;
+  onProgress?: (progress: { processed: number; total: number; verified: number; missing: number; mismatched: number }) => void;
 }
 
 export interface VerifyCosUploadedAssetsResult {
@@ -80,9 +81,20 @@ export async function verifyCosUploadedAssets(
       });
       if (!options.continueOnError) continue;
     }
+    emitProgress(options, result);
   }
 
   return result;
+}
+
+function emitProgress(options: VerifyCosUploadedAssetsOptions, result: VerifyCosUploadedAssetsResult): void {
+  options.onProgress?.({
+    processed: result.verified + result.missing + result.mismatched,
+    total: result.total,
+    verified: result.verified,
+    missing: result.missing,
+    mismatched: result.mismatched,
+  });
 }
 
 function metadataMismatchDetails(item: CosUploadManifestItem, headers: Record<string, string | number | undefined>): string[] {
@@ -125,11 +137,24 @@ function createCosClient(secretId: string, secretKey: string): CosUploadedAssetV
   const COS = require("cos-nodejs-sdk-v5") as new (options: {
     SecretId: string;
     SecretKey: string;
-  }) => CosUploadedAssetVerifierClient;
-  return new COS({
+  }) => {
+    headObject(params: CosHeadObjectParams, callback: (err: Error | null, data: CosHeadObjectResult) => void): void;
+  };
+  const client = new COS({
     SecretId: secretId,
     SecretKey: secretKey,
   });
+  return {
+    headObject: (params) => new Promise((resolve, reject) => {
+      client.headObject(params, (err, data) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(data);
+      });
+    }),
+  };
 }
 
 async function main(): Promise<void> {
@@ -139,6 +164,7 @@ async function main(): Promise<void> {
   const region = args.region;
   const secretId = args["secret-id"] ?? process.env.COS_SECRET_ID;
   const secretKey = args["secret-key"] ?? process.env.COS_SECRET_KEY;
+  const progressEvery = Number(args["progress-every"] ?? 25);
   if (!manifestPath || !bucket || !region || !secretId || !secretKey) {
     throw new Error("Missing required args: --manifest, --bucket, --region, and COS credentials");
   }
@@ -149,6 +175,11 @@ async function main(): Promise<void> {
     region,
     manifest: readJson<CosUploadManifest>(manifestPath),
     continueOnError: true,
+    onProgress: (progress) => {
+      if (progressEvery > 0 && (progress.processed % progressEvery === 0 || progress.processed === progress.total)) {
+        console.error(JSON.stringify({ progress }));
+      }
+    },
   });
   console.log(JSON.stringify(result, null, 2));
   if (result.missing > 0 || result.mismatched > 0) {

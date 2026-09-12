@@ -33,6 +33,7 @@ export interface UploadCosAssetsOptions {
   manifest: CosUploadManifest;
   dryRun?: boolean;
   continueOnError?: boolean;
+  onProgress?: (progress: { processed: number; total: number; uploaded: number; skipped: number; failed: number }) => void;
 }
 
 export interface UploadCosAssetsResult {
@@ -65,6 +66,7 @@ export async function uploadCosAssets(options: UploadCosAssetsOptions): Promise<
   for (const item of options.manifest.items) {
     if (options.dryRun) {
       result.skipped += 1;
+      emitProgress(options, result);
       continue;
     }
     try {
@@ -80,9 +82,20 @@ export async function uploadCosAssets(options: UploadCosAssetsOptions): Promise<
         break;
       }
     }
+    emitProgress(options, result);
   }
 
   return result;
+}
+
+function emitProgress(options: UploadCosAssetsOptions, result: UploadCosAssetsResult): void {
+  options.onProgress?.({
+    processed: result.uploaded + result.skipped + result.failed,
+    total: result.total,
+    uploaded: result.uploaded,
+    skipped: result.skipped,
+    failed: result.failed,
+  });
 }
 
 function toPutObjectParams(options: UploadCosAssetsOptions, item: CosUploadManifestItem): CosPutObjectParams {
@@ -124,11 +137,24 @@ function createCosClient(secretId: string, secretKey: string): CosAssetUploadCli
   const COS = require("cos-nodejs-sdk-v5") as new (options: {
     SecretId: string;
     SecretKey: string;
-  }) => CosAssetUploadClient;
-  return new COS({
+  }) => {
+    putObject(params: CosPutObjectParams, callback: (err: Error | null, data: unknown) => void): void;
+  };
+  const client = new COS({
     SecretId: secretId,
     SecretKey: secretKey,
   });
+  return {
+    putObject: (params) => new Promise((resolve, reject) => {
+      client.putObject(params, (err, data) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(data);
+      });
+    }),
+  };
 }
 
 async function main(): Promise<void> {
@@ -139,6 +165,7 @@ async function main(): Promise<void> {
   const secretId = args["secret-id"] ?? process.env.COS_SECRET_ID;
   const secretKey = args["secret-key"] ?? process.env.COS_SECRET_KEY;
   const dryRun = args["dry-run"] === "true";
+  const progressEvery = Number(args["progress-every"] ?? 25);
 
   if (!manifestPath || !bucket || !region) {
     throw new Error("Missing required args: --manifest, --bucket, --region");
@@ -155,6 +182,11 @@ async function main(): Promise<void> {
     manifest: readJson<CosUploadManifest>(manifestPath),
     dryRun,
     continueOnError: args["continue-on-error"] === "true",
+    onProgress: (progress) => {
+      if (progressEvery > 0 && (progress.processed % progressEvery === 0 || progress.processed === progress.total)) {
+        console.error(JSON.stringify({ progress }));
+      }
+    },
   });
   console.log(JSON.stringify(result, null, 2));
   if (result.failed > 0) {
