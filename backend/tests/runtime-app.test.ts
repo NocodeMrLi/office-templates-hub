@@ -3,6 +3,29 @@ import { describe, expect, test } from "vitest";
 import { createRuntimeApp } from "../src/runtime-app.js";
 
 describe("createRuntimeApp", () => {
+  test("reports object storage as configured when COS settings are present", async () => {
+    const app = await createRuntimeApp({
+      devicePepper: "runtime-device-pepper",
+      codePepper: "runtime-code-pepper",
+      recoveryPepper: "runtime-recovery-pepper",
+      cos: {
+        secretId: "test-secret-id",
+        secretKey: "test-secret-key",
+        bucket: "office-templates-1250000000",
+        region: "ap-shanghai",
+      },
+    });
+
+    const health = await app.inject({ method: "GET", url: "/api/health" });
+
+    expect(health.json()).toEqual({
+      status: "ok",
+      dependencies: { database: "ok", object_storage: "ok" },
+    });
+    expect(health.body).not.toContain("test-secret");
+    await app.close();
+  });
+
   test("loads the published catalog and serves searchable runtime endpoints", async () => {
     const app = await createRuntimeApp({
       devicePepper: "runtime-device-pepper",

@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import { buildApp, type RegistrationResultStore } from "./app.js";
 import { CatalogService, type PublicTemplate } from "./domain/catalog-service.js";
 import { DeviceService, type DeviceRecord, type DeviceRepository } from "./domain/device-service.js";
+import { CosObjectSigner, type CosGetObjectUrlClient } from "./infrastructure/cos-object-signer.js";
 import {
   DownloadService,
   type DownloadEntitlementRepository,
@@ -29,6 +31,15 @@ export interface RuntimeAppOptions {
   devicePepper: string;
   codePepper: string;
   recoveryPepper: string;
+  cos?: RuntimeCosOptions;
+}
+
+export interface RuntimeCosOptions {
+  secretId: string;
+  secretKey: string;
+  bucket: string;
+  region: string;
+  expiresSeconds?: number;
 }
 
 interface CatalogSource {
@@ -48,6 +59,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
   const deviceService = new DeviceService(devices, options.devicePepper);
   const usageQuotaService = new UsageQuotaService(usage);
   const templateRepository = new CatalogBackedDownloadTemplateRepository(catalogSource.items);
+  const objectStorage = createObjectStorage(options.cos);
 
   return buildApp({
     deviceService,
@@ -64,7 +76,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
       entitlements,
       quota: new InMemoryDownloadQuotaService(entitlements),
       events: downloadEvents,
-      signer: new NotConfiguredObjectSigner(),
+      signer: objectStorage.signer,
     }),
     redeemService: new RedeemService(codeRepository, usageQuotaService, options.codePepper),
     recoveryService: new RecoveryService({
@@ -73,8 +85,33 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
       devicePepper: options.devicePepper,
       recoveryPepper: options.recoveryPepper,
     }),
-    health: async () => ({ database: "ok", objectStorage: "not_configured" }),
+    health: async () => ({ database: "ok", objectStorage: objectStorage.status }),
   });
+}
+
+function createObjectStorage(cos: RuntimeCosOptions | undefined): {
+  status: "ok" | "not_configured";
+  signer: CosObjectSigner | NotConfiguredObjectSigner;
+} {
+  if (!cos) {
+    return { status: "not_configured", signer: new NotConfiguredObjectSigner() };
+  }
+  const require = createRequire(import.meta.url);
+  const COS = require("cos-nodejs-sdk-v5") as new (options: {
+    SecretId: string;
+    SecretKey: string;
+  }) => CosGetObjectUrlClient;
+  return {
+    status: "ok",
+    signer: new CosObjectSigner(new COS({
+      SecretId: cos.secretId,
+      SecretKey: cos.secretKey,
+    }), {
+      bucket: cos.bucket,
+      region: cos.region,
+      expiresSeconds: cos.expiresSeconds ?? 300,
+    }),
+  };
 }
 
 function readCatalog(path = fileURLToPath(new URL("../../data/catalog.public.json", import.meta.url))): CatalogSource {
