@@ -33,12 +33,24 @@ export interface DownloadServicePort {
   }>;
 }
 
+export interface RedeemServicePort {
+  redeem(request: {
+    deviceId: string;
+    code: string;
+  }): Promise<{
+    entitlement: string;
+    daily_limit: number;
+    expires_at: string;
+  }>;
+}
+
 export interface AppDependencies {
   deviceService: DeviceService;
   registrationResults: RegistrationResultStore;
   catalogService: CatalogService;
   searchService: SearchService;
   downloadService: DownloadServicePort;
+  redeemService: RedeemServicePort;
   health(): Promise<{ database: "ok" | "unavailable"; objectStorage: "ok" | "unavailable" | "not_configured" }>;
 }
 
@@ -123,6 +135,36 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     }
   });
 
+  app.post("/api/redeem", async (request, reply) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || !isValidIdempotencyKey(key)) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "Idempotency-Key 格式无效"));
+    }
+    const deviceSecret = parseBearerSecret(request.headers.authorization);
+    if (!deviceSecret) {
+      return reply.code(401).send(errorResponse("UNAUTHORIZED_DEVICE", "设备凭证无效"));
+    }
+
+    const parsed = z.object({
+      device_id: z.string().min(1).max(128),
+      code: z.string().min(1).max(256),
+    }).safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "兑换参数无效"));
+    }
+
+    try {
+      await dependencies.deviceService.authenticate(parsed.data.device_id, deviceSecret);
+      return await dependencies.redeemService.redeem({
+        deviceId: parsed.data.device_id,
+        code: parsed.data.code,
+      });
+    } catch (error) {
+      const mapped = mapRedeemError(error);
+      return reply.code(mapped.status).send(errorResponse(mapped.code, mapped.message));
+    }
+  });
+
   app.post("/api/device/register", async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string") {
@@ -174,6 +216,19 @@ function mapDownloadError(error: unknown): { status: number; code: string; messa
     }
     if (code === "DEPENDENCY_UNAVAILABLE") {
       return { status: 503, code, message: "下载凭证签发失败" };
+    }
+    if (code === "UNAUTHORIZED_DEVICE") {
+      return { status: 401, code, message: "设备凭证无效" };
+    }
+  }
+  return { status: 500, code: "INTERNAL_ERROR", message: "服务暂时不可用" };
+}
+
+function mapRedeemError(error: unknown): { status: number; code: string; message: string } {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = String(error.code);
+    if (code === "INVALID_REDEEM_CODE") {
+      return { status: 400, code, message: "兑换码无效或已失效" };
     }
     if (code === "UNAUTHORIZED_DEVICE") {
       return { status: 401, code, message: "设备凭证无效" };

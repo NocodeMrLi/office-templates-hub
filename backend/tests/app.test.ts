@@ -105,6 +105,20 @@ function createTestApp() {
         quota_remaining: 4,
       }),
     },
+    redeemService: {
+      redeem: async (request) => {
+        if (request.code !== "AF-ORDER-001-CODE") {
+          const error = new Error("兑换码无效或已失效") as Error & { code: string };
+          error.code = "INVALID_REDEEM_CODE";
+          throw error;
+        }
+        return {
+          entitlement: "afdian_month",
+          daily_limit: 30,
+          expires_at: "2026-10-12T02:00:00.000Z",
+        };
+      },
+    },
     health: async () => ({ database: "ok", objectStorage: "not_configured" }),
   });
   return { app, devices };
@@ -280,6 +294,70 @@ describe("HTTP API", () => {
         message: "设备凭证无效",
       },
     });
+    await app.close();
+  });
+
+  test("redeems an Afdian code with idempotency and bearer device secret", async () => {
+    const { app } = createTestApp();
+    const registration = await app.inject({
+      method: "POST",
+      url: "/api/device/register",
+      headers: { "idempotency-key": "register-before-redeem-1" },
+    });
+    const credentials = registration.json() as { device_id: string; device_secret: string };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/redeem",
+      headers: {
+        "idempotency-key": "redeem-idempotent-1",
+        authorization: `Bearer ${credentials.device_secret}`,
+      },
+      payload: {
+        device_id: credentials.device_id,
+        code: "AF-ORDER-001-CODE",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      entitlement: "afdian_month",
+      daily_limit: 30,
+      expires_at: "2026-10-12T02:00:00.000Z",
+    });
+    await app.close();
+  });
+
+  test("returns a safe error envelope for an invalid redeem code", async () => {
+    const { app } = createTestApp();
+    const registration = await app.inject({
+      method: "POST",
+      url: "/api/device/register",
+      headers: { "idempotency-key": "register-before-redeem-2" },
+    });
+    const credentials = registration.json() as { device_id: string; device_secret: string };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/redeem",
+      headers: {
+        "idempotency-key": "redeem-idempotent-1",
+        authorization: `Bearer ${credentials.device_secret}`,
+      },
+      payload: {
+        device_id: credentials.device_id,
+        code: "WRONG-CODE",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "INVALID_REDEEM_CODE",
+        message: "兑换码无效或已失效",
+      },
+    });
+    expect(response.body).not.toContain("WRONG-CODE");
     await app.close();
   });
 });
