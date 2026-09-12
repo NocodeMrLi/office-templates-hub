@@ -1,7 +1,7 @@
 {
   "name": "office-templates-hub",
   "version": "0.1.0",
-  "description": "AI-ready search and secure delivery service for Chinese workplace templates and workflow assets.",
+  "description": "AI-ready search and secure delivery service for workplace templates and workflow assets.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -9,6 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "dev": "tsx backend/src/server.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

@@ -254,6 +254,9 @@ function mapDownloadError(error: unknown): { status: number; code: string; messa
     if (code === "DEPENDENCY_UNAVAILABLE") {
       return { status: 503, code, message: "下载凭证签发失败" };
     }
+    if (code === "QUOTA_EXHAUSTED") {
+      return { status: 429, code, message: "今日下载额度已用完" };
+    }
     if (code === "UNAUTHORIZED_DEVICE") {
       return { status: 401, code, message: "设备凭证无效" };
     }

@@ -311,6 +311,49 @@ describe("HTTP API", () => {
     await app.close();
   });
 
+  test("maps exhausted download quota to a safe client error", async () => {
+    const devices = new TestDeviceRepository();
+    const registrations = new TestRegistrationResultStore();
+    const app = buildApp({
+      deviceService: new DeviceService(devices, "test-device-pepper"),
+      registrationResults: registrations,
+      catalogService: CatalogService.fromUnknown({ count: 0, items: [] }),
+      searchService: new SearchService([]),
+      downloadService: {
+        download: async () => {
+          const error = new Error("quota exhausted") as Error & { code: string };
+          error.code = "QUOTA_EXHAUSTED";
+          throw error;
+        },
+      },
+      redeemService: { redeem: async () => { throw new Error("not used"); } },
+      recoveryService: { recover: async () => { throw new Error("not used"); } },
+      health: async () => ({ database: "ok", objectStorage: "not_configured" }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/download",
+      headers: {
+        "idempotency-key": "download-quota-1",
+        authorization: "Bearer secret",
+      },
+      payload: {
+        device_id: "device-1",
+        public_id: "tpl_alpha000000001",
+      },
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "QUOTA_EXHAUSTED",
+        message: "今日下载额度已用完",
+      },
+    });
+    await app.close();
+  });
+
   test("redeems an Afdian code with idempotency and bearer device secret", async () => {
     const { app } = createTestApp();
     const registration = await app.inject({
