@@ -119,6 +119,20 @@ function createTestApp() {
         };
       },
     },
+    recoveryService: {
+      recover: async (request) => {
+        if (request.recoveryCode !== "RECOVERY-CODE-001") {
+          const error = new Error("恢复码无效或已失效") as Error & { code: string };
+          error.code = "INVALID_RECOVERY_CODE";
+          throw error;
+        }
+        return {
+          device_id: request.deviceId,
+          device_secret: "new-device-secret",
+          recovery_code: "REC-new-recovery-code",
+        };
+      },
+    },
     health: async () => ({ database: "ok", objectStorage: "not_configured" }),
   });
   return { app, devices };
@@ -358,6 +372,52 @@ describe("HTTP API", () => {
       },
     });
     expect(response.body).not.toContain("WRONG-CODE");
+    await app.close();
+  });
+
+  test("recovers a device with a one-time recovery code", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/recover",
+      headers: { "idempotency-key": "recover-idempotent-1" },
+      payload: {
+        device_id: "device-1",
+        recovery_code: "RECOVERY-CODE-001",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      device_id: "device-1",
+      device_secret: "new-device-secret",
+      recovery_code: "REC-new-recovery-code",
+    });
+    await app.close();
+  });
+
+  test("returns a safe error envelope for an invalid recovery code", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/recover",
+      headers: { "idempotency-key": "recover-idempotent-1" },
+      payload: {
+        device_id: "device-1",
+        recovery_code: "WRONG-RECOVERY",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "INVALID_RECOVERY_CODE",
+        message: "恢复码无效或已失效",
+      },
+    });
+    expect(response.body).not.toContain("WRONG-RECOVERY");
     await app.close();
   });
 });

@@ -1,6 +1,8 @@
 # Office Templates Hub
 
-AI-ready search and secure delivery service for 1,300+ professionally designed Chinese workplace Excel templates.
+AI-ready search and secure delivery service for a growing library of workplace templates and workflow assets.
+
+The first release focuses on 1,300+ professionally designed spreadsheet templates. The product is intentionally broader than project management or any single locale: future collections can cover operations, HR, finance, sales, administration, compliance, and other everyday workplace scenarios without changing the core delivery model.
 
 ## Current status
 

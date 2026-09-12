@@ -44,6 +44,17 @@ export interface RedeemServicePort {
   }>;
 }
 
+export interface RecoveryServicePort {
+  recover(request: {
+    deviceId: string;
+    recoveryCode: string;
+  }): Promise<{
+    device_id: string;
+    device_secret: string;
+    recovery_code: string;
+  }>;
+}
+
 export interface AppDependencies {
   deviceService: DeviceService;
   registrationResults: RegistrationResultStore;
@@ -51,6 +62,7 @@ export interface AppDependencies {
   searchService: SearchService;
   downloadService: DownloadServicePort;
   redeemService: RedeemServicePort;
+  recoveryService: RecoveryServicePort;
   health(): Promise<{ database: "ok" | "unavailable"; objectStorage: "ok" | "unavailable" | "not_configured" }>;
 }
 
@@ -165,6 +177,31 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     }
   });
 
+  app.post("/api/recover", async (request, reply) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || !isValidIdempotencyKey(key)) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "Idempotency-Key 格式无效"));
+    }
+
+    const parsed = z.object({
+      device_id: z.string().min(1).max(128),
+      recovery_code: z.string().min(1).max(256),
+    }).safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "恢复参数无效"));
+    }
+
+    try {
+      return await dependencies.recoveryService.recover({
+        deviceId: parsed.data.device_id,
+        recoveryCode: parsed.data.recovery_code,
+      });
+    } catch (error) {
+      const mapped = mapRecoveryError(error);
+      return reply.code(mapped.status).send(errorResponse(mapped.code, mapped.message));
+    }
+  });
+
   app.post("/api/device/register", async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string") {
@@ -232,6 +269,16 @@ function mapRedeemError(error: unknown): { status: number; code: string; message
     }
     if (code === "UNAUTHORIZED_DEVICE") {
       return { status: 401, code, message: "设备凭证无效" };
+    }
+  }
+  return { status: 500, code: "INTERNAL_ERROR", message: "服务暂时不可用" };
+}
+
+function mapRecoveryError(error: unknown): { status: number; code: string; message: string } {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = String(error.code);
+    if (code === "INVALID_RECOVERY_CODE") {
+      return { status: 400, code, message: "恢复码无效或已失效" };
     }
   }
   return { status: 500, code: "INTERNAL_ERROR", message: "服务暂时不可用" };

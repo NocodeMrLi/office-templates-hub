@@ -1,6 +1,7 @@
 {
   "name": "office-templates-hub",
   "version": "0.1.0",
+  "description": "AI-ready search and secure delivery service for Chinese workplace templates and workflow assets.",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
