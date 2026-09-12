@@ -40,6 +40,8 @@ export interface RuntimeCosOptions {
   bucket: string;
   region: string;
   expiresSeconds?: number;
+  objectPrefix?: string;
+  client?: CosGetObjectUrlClient;
 }
 
 interface CatalogSource {
@@ -58,7 +60,10 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
   const catalogService = CatalogService.fromUnknown(catalogSource);
   const deviceService = new DeviceService(devices, options.devicePepper);
   const usageQuotaService = new UsageQuotaService(usage);
-  const templateRepository = new CatalogBackedDownloadTemplateRepository(catalogSource.items);
+  const templateRepository = new CatalogBackedDownloadTemplateRepository(
+    catalogSource.items,
+    options.cos?.objectPrefix ?? "templates/",
+  );
   const objectStorage = createObjectStorage(options.cos);
 
   return buildApp({
@@ -96,22 +101,27 @@ function createObjectStorage(cos: RuntimeCosOptions | undefined): {
   if (!cos) {
     return { status: "not_configured", signer: new NotConfiguredObjectSigner() };
   }
-  const require = createRequire(import.meta.url);
-  const COS = require("cos-nodejs-sdk-v5") as new (options: {
-    SecretId: string;
-    SecretKey: string;
-  }) => CosGetObjectUrlClient;
+  const client = cos.client ?? createCosClient(cos.secretId, cos.secretKey);
   return {
     status: "ok",
-    signer: new CosObjectSigner(new COS({
-      SecretId: cos.secretId,
-      SecretKey: cos.secretKey,
-    }), {
+    signer: new CosObjectSigner(client, {
       bucket: cos.bucket,
       region: cos.region,
       expiresSeconds: cos.expiresSeconds ?? 300,
     }),
   };
+}
+
+function createCosClient(secretId: string, secretKey: string): CosGetObjectUrlClient {
+  const require = createRequire(import.meta.url);
+  const COS = require("cos-nodejs-sdk-v5") as new (options: {
+    SecretId: string;
+    SecretKey: string;
+  }) => CosGetObjectUrlClient;
+  return new COS({
+    SecretId: secretId,
+    SecretKey: secretKey,
+  });
 }
 
 function readCatalog(path = fileURLToPath(new URL("../../data/catalog.public.json", import.meta.url))): CatalogSource {
@@ -251,11 +261,12 @@ function chinaDayKey(date: Date): string {
 class CatalogBackedDownloadTemplateRepository implements DownloadTemplateRepository {
   private readonly templates: Map<string, DownloadTemplate>;
 
-  constructor(items: readonly PublicTemplate[]) {
+  constructor(items: readonly PublicTemplate[], objectPrefix: string) {
+    const normalizedObjectPrefix = normalizeObjectPrefix(objectPrefix);
     this.templates = new Map(items.map((item) => [item.public_id, {
       publicId: item.public_id,
       accessTier: item.access_tier,
-      objectKey: `not-configured/${item.public_id}`,
+      objectKey: `${normalizedObjectPrefix}${item.public_id}.xlsx`,
       sha256: "not_configured",
       status: "active" as const,
     }]));
@@ -264,6 +275,12 @@ class CatalogBackedDownloadTemplateRepository implements DownloadTemplateReposit
   async findByPublicId(publicId: string): Promise<DownloadTemplate | null> {
     return structuredClone(this.templates.get(publicId) ?? null);
   }
+}
+
+function normalizeObjectPrefix(prefix: string): string {
+  const withoutLeadingSlash = prefix.replace(/^\/+/, "");
+  if (withoutLeadingSlash === "") return "";
+  return withoutLeadingSlash.endsWith("/") ? withoutLeadingSlash : `${withoutLeadingSlash}/`;
 }
 
 class InMemoryDownloadEventRepository implements DownloadEventRepository {

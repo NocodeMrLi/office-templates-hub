@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createRuntimeApp } from "../src/runtime-app.js";
+import type { CosGetObjectUrlClient } from "../src/infrastructure/cos-object-signer.js";
 
 describe("createRuntimeApp", () => {
   test("reports object storage as configured when COS settings are present", async () => {
@@ -85,6 +86,56 @@ describe("createRuntimeApp", () => {
         code: "DEPENDENCY_UNAVAILABLE",
         message: "下载凭证签发失败",
       },
+    });
+    await app.close();
+  });
+
+  test("signs runtime downloads with the configured COS object prefix", async () => {
+    const signedKeys: string[] = [];
+    const cosClient: CosGetObjectUrlClient = {
+      getObjectUrl: (params, callback) => {
+        signedKeys.push(params.Key);
+        callback(null, { Url: `https://signed.example/${params.Key}?sign=1` });
+      },
+    };
+    const app = await createRuntimeApp({
+      devicePepper: "runtime-device-pepper",
+      codePepper: "runtime-code-pepper",
+      recoveryPepper: "runtime-recovery-pepper",
+      cos: {
+        secretId: "test-secret-id",
+        secretKey: "test-secret-key",
+        bucket: "office-templates-assets-1455917634",
+        region: "ap-guangzhou",
+        objectPrefix: "templates/",
+        client: cosClient,
+      },
+    });
+    const registration = await app.inject({
+      method: "POST",
+      url: "/api/device/register",
+      headers: { "idempotency-key": "runtime-register-prefix" },
+    });
+    const credentials = registration.json() as { device_id: string; device_secret: string };
+
+    const download = await app.inject({
+      method: "POST",
+      url: "/api/download",
+      headers: {
+        "idempotency-key": "runtime-download-prefix",
+        authorization: `Bearer ${credentials.device_secret}`,
+      },
+      payload: {
+        device_id: credentials.device_id,
+        public_id: "tpl_a2c994bc09c89d37",
+      },
+    });
+
+    expect(download.statusCode).toBe(200);
+    expect(signedKeys).toEqual(["templates/tpl_a2c994bc09c89d37.xlsx"]);
+    expect(download.json()).toMatchObject({
+      public_id: "tpl_a2c994bc09c89d37",
+      download_url: "https://signed.example/templates/tpl_a2c994bc09c89d37.xlsx?sign=1",
     });
     await app.close();
   });

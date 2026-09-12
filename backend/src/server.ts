@@ -34,6 +34,7 @@ function readCosConfig() {
     secretKey,
     bucket,
     region,
+    objectPrefix: process.env.COS_OBJECT_PREFIX ?? "templates/",
     expiresSeconds: Number(process.env.COS_SIGN_EXPIRES_SECONDS ?? 300),
   };
 }
