@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { buildApp, type RegistrationResultStore } from "../src/app.js";
 import { CatalogService } from "../src/domain/catalog-service.js";
 import { DeviceService, type DeviceRecord, type DeviceRepository } from "../src/domain/device-service.js";
+import { SearchService } from "../src/domain/search-service.js";
 
 class TestDeviceRepository implements DeviceRepository {
   readonly records = new Map<string, DeviceRecord>();
@@ -47,6 +48,20 @@ class TestRegistrationResultStore implements RegistrationResultStore {
 function createTestApp() {
   const devices = new TestDeviceRepository();
   const registrations = new TestRegistrationResultStore();
+  const searchTemplates = [{
+    public_id: "tpl_alpha000000001",
+    display_name: "项目风险登记表（标准版）",
+    canonical_title: "项目风险登记表",
+    intent: "risk_register",
+    intent_name: "风险登记",
+    industry: "通用项目管理",
+    project_phase: "执行",
+    roles: ["项目经理"],
+    purpose: "记录风险",
+    output: "风险台账",
+    field_names: ["风险事项", "责任人"],
+    access_tier: "free" as const,
+  }];
   const app = buildApp({
     deviceService: new DeviceService(devices, "test-device-pepper"),
     registrationResults: registrations,
@@ -80,6 +95,7 @@ function createTestApp() {
         object_tags: [],
       }],
     }),
+    searchService: new SearchService(searchTemplates),
     health: async () => ({ database: "ok", objectStorage: "not_configured" }),
   });
   return { app, devices };
@@ -165,6 +181,46 @@ describe("HTTP API", () => {
 
     expect(new Set(responses.map((response) => response.body)).size).toBe(1);
     expect(devices.records.size).toBe(1);
+    await app.close();
+  });
+
+  test("searches templates without decrementing usage", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/search",
+      payload: { query: "项目风险登记表", limit: 1 },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      usage_decrement_allowed: false,
+      decision: "recommend",
+      top_result: {
+        public_id: "tpl_alpha000000001",
+        access_tier: "free",
+      },
+    });
+    await app.close();
+  });
+
+  test("rejects malformed search requests with the documented error envelope", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/search",
+      payload: { query: "", limit: 1 },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "INVALID_PARAM",
+        message: "搜索参数无效",
+      },
+    });
     await app.close();
   });
 });

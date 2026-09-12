@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { DeviceService } from "./domain/device-service.js";
 import type { CatalogService } from "./domain/catalog-service.js";
+import type { SearchService } from "./domain/search-service.js";
 
 interface RegistrationCredentials {
   deviceId: string;
@@ -21,6 +22,7 @@ export interface AppDependencies {
   deviceService: DeviceService;
   registrationResults: RegistrationResultStore;
   catalogService: CatalogService;
+  searchService: SearchService;
   health(): Promise<{ database: "ok" | "unavailable"; objectStorage: "ok" | "unavailable" | "not_configured" }>;
 }
 
@@ -54,6 +56,24 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
         object_storage: health.objectStorage,
       },
     };
+  });
+
+  app.post("/api/search", async (request, reply) => {
+    const parsed = z.object({
+      query: z.string().trim().min(1).max(200),
+      limit: z.number().int().min(1).max(10).default(3),
+      industry: z.string().min(1).optional(),
+      access_tier: z.enum(["free", "paid"]).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "搜索参数无效"));
+    }
+    return dependencies.searchService.search({
+      query: parsed.data.query,
+      limit: parsed.data.limit,
+      ...(parsed.data.industry === undefined ? {} : { industry: parsed.data.industry }),
+      ...(parsed.data.access_tier === undefined ? {} : { accessTier: parsed.data.access_tier }),
+    });
   });
 
   app.post("/api/device/register", async (request, reply) => {
