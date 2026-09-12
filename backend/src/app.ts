@@ -18,11 +18,27 @@ export interface RegistrationResultStore {
   ): Promise<RegistrationCredentials>;
 }
 
+export interface DownloadServicePort {
+  download(request: {
+    deviceId: string;
+    deviceSecret: string;
+    idempotencyKey: string;
+    publicId: string;
+  }): Promise<{
+    public_id: string;
+    download_url: string;
+    expires_at: string;
+    sha256: string;
+    quota_remaining: number;
+  }>;
+}
+
 export interface AppDependencies {
   deviceService: DeviceService;
   registrationResults: RegistrationResultStore;
   catalogService: CatalogService;
   searchService: SearchService;
+  downloadService: DownloadServicePort;
   health(): Promise<{ database: "ok" | "unavailable"; objectStorage: "ok" | "unavailable" | "not_configured" }>;
 }
 
@@ -76,12 +92,43 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
     });
   });
 
+  app.post("/api/download", async (request, reply) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string" || !isValidIdempotencyKey(key)) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "Idempotency-Key 格式无效"));
+    }
+    const deviceSecret = parseBearerSecret(request.headers.authorization);
+    if (!deviceSecret) {
+      return reply.code(401).send(errorResponse("UNAUTHORIZED_DEVICE", "设备凭证无效"));
+    }
+
+    const parsed = z.object({
+      device_id: z.string().min(1).max(128),
+      public_id: z.string().min(1).max(128),
+    }).safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "下载参数无效"));
+    }
+
+    try {
+      return await dependencies.downloadService.download({
+        deviceId: parsed.data.device_id,
+        deviceSecret,
+        idempotencyKey: key,
+        publicId: parsed.data.public_id,
+      });
+    } catch (error) {
+      const mapped = mapDownloadError(error);
+      return reply.code(mapped.status).send(errorResponse(mapped.code, mapped.message));
+    }
+  });
+
   app.post("/api/device/register", async (request, reply) => {
     const key = request.headers["idempotency-key"];
     if (typeof key !== "string") {
       return reply.code(400).send(errorResponse("INVALID_PARAM", "缺少 Idempotency-Key 请求头"));
     }
-    if (!/^[A-Za-z0-9._:-]{8,128}$/.test(key)) {
+    if (!isValidIdempotencyKey(key)) {
       return reply.code(400).send(errorResponse("INVALID_PARAM", "Idempotency-Key 格式无效"));
     }
 
@@ -99,4 +146,38 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
 
 function errorResponse(code: string, message: string) {
   return { error: { code, message, request_id: randomUUID() } };
+}
+
+function isValidIdempotencyKey(key: string): boolean {
+  return /^[A-Za-z0-9._:-]{8,128}$/.test(key);
+}
+
+function parseBearerSecret(value: string | undefined): string | null {
+  if (!value?.startsWith("Bearer ")) {
+    return null;
+  }
+  const secret = value.slice("Bearer ".length).trim();
+  return secret.length > 0 ? secret : null;
+}
+
+function mapDownloadError(error: unknown): { status: number; code: string; message: string } {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = String(error.code);
+    if (code === "IDEMPOTENCY_CONFLICT") {
+      return { status: 409, code, message: "同一幂等键的请求参数不一致" };
+    }
+    if (code === "FORBIDDEN_ASSET") {
+      return { status: 403, code, message: "当前设备无权下载该资产" };
+    }
+    if (code === "TEMPLATE_NOT_FOUND") {
+      return { status: 404, code, message: "模板不存在或不可用" };
+    }
+    if (code === "DEPENDENCY_UNAVAILABLE") {
+      return { status: 503, code, message: "下载凭证签发失败" };
+    }
+    if (code === "UNAUTHORIZED_DEVICE") {
+      return { status: 401, code, message: "设备凭证无效" };
+    }
+  }
+  return { status: 500, code: "INTERNAL_ERROR", message: "服务暂时不可用" };
 }

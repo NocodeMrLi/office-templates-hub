@@ -96,6 +96,15 @@ function createTestApp() {
       }],
     }),
     searchService: new SearchService(searchTemplates),
+    downloadService: {
+      download: async (request) => ({
+        public_id: request.publicId,
+        download_url: "https://signed.example/download",
+        expires_at: "2026-09-12T10:05:00.000Z",
+        sha256: "sha-free",
+        quota_remaining: 4,
+      }),
+    },
     health: async () => ({ database: "ok", objectStorage: "not_configured" }),
   });
   return { app, devices };
@@ -219,6 +228,56 @@ describe("HTTP API", () => {
       error: {
         code: "INVALID_PARAM",
         message: "搜索参数无效",
+      },
+    });
+    await app.close();
+  });
+
+  test("downloads through POST with idempotency and bearer device secret", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/download",
+      headers: {
+        "idempotency-key": "download-idempotent-1",
+        authorization: "Bearer secret-1",
+      },
+      payload: {
+        device_id: "device-1",
+        public_id: "tpl_alpha000000001",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      public_id: "tpl_alpha000000001",
+      download_url: "https://signed.example/download",
+      expires_at: "2026-09-12T10:05:00.000Z",
+      sha256: "sha-free",
+      quota_remaining: 4,
+    });
+    await app.close();
+  });
+
+  test("rejects download requests without a bearer device secret", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/download",
+      headers: { "idempotency-key": "download-idempotent-1" },
+      payload: {
+        device_id: "device-1",
+        public_id: "tpl_alpha000000001",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "UNAUTHORIZED_DEVICE",
+        message: "设备凭证无效",
       },
     });
     await app.close();
