@@ -35,9 +35,17 @@ export interface RuntimeAppOptions {
   repositories?: RuntimeRepositories;
 }
 
+export interface RuntimeEntitlementRepository extends DownloadEntitlementRepository {
+  findActiveEntitlement(deviceId: string, at: Date): Promise<EntitlementRecord | null>;
+}
+
+interface WritableRuntimeEntitlementRepository extends RuntimeEntitlementRepository {
+  create(record: EntitlementRecord): Promise<void>;
+}
+
 export interface RuntimeRepositories {
   devices: DeviceRepository;
-  entitlements: InMemoryEntitlementRepository;
+  entitlements: RuntimeEntitlementRepository;
   usage: UsageQuotaRepository;
   recoveryCodes: RecoveryCodeRepository;
   codes: CodeRepository;
@@ -198,8 +206,12 @@ class InMemoryRegistrationResultStore implements RegistrationResultStore {
   }
 }
 
-class InMemoryEntitlementRepository implements DownloadEntitlementRepository {
+class InMemoryEntitlementRepository implements WritableRuntimeEntitlementRepository {
   readonly entitlements: EntitlementRecord[] = [];
+
+  async create(record: EntitlementRecord): Promise<void> {
+    this.entitlements.push(structuredClone(record));
+  }
 
   async hasPaidAccess(deviceId: string, at: Date): Promise<boolean> {
     return (await this.findActiveEntitlement(deviceId, at)) !== null;
@@ -217,10 +229,10 @@ class InMemoryEntitlementRepository implements DownloadEntitlementRepository {
 class InMemoryUsageQuotaRepository implements UsageQuotaRepository {
   private readonly usage = new Map<string, number>();
 
-  constructor(private readonly entitlementRepository: InMemoryEntitlementRepository) {}
+  constructor(private readonly entitlementRepository: WritableRuntimeEntitlementRepository) {}
 
   async createEntitlement(record: EntitlementRecord): Promise<void> {
-    this.entitlementRepository.entitlements.push(structuredClone(record));
+    await this.entitlementRepository.create(record);
   }
 
   async findActiveEntitlement(deviceId: string, at: Date): Promise<EntitlementRecord | null> {
@@ -243,7 +255,7 @@ class InMemoryDownloadQuotaService implements DownloadQuotaService {
   private readonly deliveredDaily = new Map<string, number>();
   private readonly reservations = new Map<string, { deviceId: string; day: string; remainingAfterDelivery: number }>();
 
-  constructor(private readonly entitlements: InMemoryEntitlementRepository) {}
+  constructor(private readonly entitlements: RuntimeEntitlementRepository) {}
 
   async reserve(deviceId: string, at: Date): Promise<{ reservationId: string; remainingAfterDelivery: number }> {
     const day = chinaDayKey(at);
