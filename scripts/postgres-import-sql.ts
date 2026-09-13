@@ -28,7 +28,7 @@ export function buildPostgresImportSql(options: PostgresImportSqlOptions): Postg
     .filter((line) => line.trim().length > 0)
     .map((line, index) => parseJsonObject(line, index + 1));
   const inserts = documents.map((document) =>
-    `INSERT INTO ${collection} (doc) VALUES (${jsonbSqlLiteral(document)});`);
+    `INSERT INTO ${collection} (doc) VALUES (${jsonbSqlLiteral(document)}) ON CONFLICT DO NOTHING;`);
   const chunkSize = options.chunkSize;
   if (chunkSize !== undefined) {
     if (!Number.isInteger(chunkSize) || chunkSize < 1) {

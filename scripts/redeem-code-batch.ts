@@ -20,9 +20,13 @@ export interface RedeemCodeImportData {
 export interface RedeemCodeImportItem {
   code_digest: string;
   type: RedeemCodeType;
+  value: number;
   status: "active";
   source_order_id: string;
   created_at: string;
+  expires_at: null;
+  redeemed_by_device_id: null;
+  redeemed_at: null;
 }
 
 export interface RedeemCodeBatch {
@@ -65,9 +69,13 @@ export function buildRedeemCodeBatch(options: RedeemCodeBatchOptions): RedeemCod
     items.push({
       code_digest: digestCode(code, options.pepper),
       type: options.type,
+      value: valueForType(options.type),
       status: "active",
       source_order_id: `${options.batchId}-${String(index).padStart(4, "0")}`,
       created_at: createdAt,
+      expires_at: null,
+      redeemed_by_device_id: null,
+      redeemed_at: null,
     });
   }
 
@@ -80,6 +88,13 @@ export function buildRedeemCodeBatch(options: RedeemCodeBatchOptions): RedeemCod
       items,
     },
   };
+}
+
+function valueForType(type: RedeemCodeType): number {
+  switch (type) {
+    case "afdian_month":
+      return 31;
+  }
 }
 
 function nextUniqueCode(randomBytes: (size: number) => Buffer, seenCodes: Set<string>): string {

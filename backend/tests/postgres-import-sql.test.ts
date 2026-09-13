@@ -21,6 +21,7 @@ describe("buildPostgresImportSql", () => {
       expect(result.count).toBe(2);
       expect(result.sql).toContain("BEGIN;");
       expect(result.sql).toContain("INSERT INTO \"templates\" (doc) VALUES");
+      expect(result.sql).toContain("ON CONFLICT DO NOTHING;");
       expect(result.sql).toContain("owner''s plan");
       expect(result.sql.endsWith("COMMIT;\n")).toBe(true);
     } finally {

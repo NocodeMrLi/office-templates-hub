@@ -11,8 +11,30 @@ Generated private files:
 - PostgreSQL schema SQL: `/tmp/office-templates-postgres-schema.private.sql`
 - PostgreSQL template import SQL: `/tmp/office-templates-postgres-templates-import.private.sql`
 - PostgreSQL template import chunks: `/tmp/office-templates-postgres-import-chunks.private/templates-001.sql` through `templates-014.sql`
+- Afdian 31-day sales-test plaintext codes: local private delivery file outside the repository; do not commit, paste, or screenshot the codes.
+- Afdian 31-day sales-test digest import data: `/tmp/office-templates-afdian-month-sales-test-20260913-import.private.json`
+- PostgreSQL Afdian sales-test codes import SQL: `/tmp/office-templates-postgres-codes-import.private.20260913-2308.sql`
 
 These files are private local handoff artifacts. They are not committed.
+
+## Current CloudBase PostgreSQL Import Status
+
+As of 2026-09-13 22:44 CST, the `office-templates-dev-d3aac865706` CloudBase PostgreSQL environment has the template catalog metadata imported and verified.
+
+- Before import: `templates` had 860 rows.
+- After idempotent completion import: `templates` has 1319 rows.
+- Read-only verification: total 1319, distinct `public_id` 1319, active 1319, free 500, paid 819, invalid `object_key` 0.
+- Runtime tables checked during this pass: `devices` 0, `download_events` 0, `entitlements` 0.
+
+As of 2026-09-13 23:08 CST, the first Afdian 31-day monthly subscription sales-test code batch is imported and verified in PostgreSQL `codes` as digests only.
+
+- Before import: `codes` had 0 rows.
+- After idempotent import: `codes` has 3 rows and 3 distinct `code_digest` values.
+- Distribution: type `afdian_month`, status `active`, value `31`, count 3.
+- Safety verification: plaintext `code` field count 0; redeemed count for this batch 0.
+- Idempotency verification: re-running the same import kept total/distinct at 3/3.
+
+This status means template metadata and the first Afdian sales-test code digests are imported and verified. It does not mean the CloudBase service is deployed, the platform product is configured, or the product is online.
 
 ## Runtime Variables
 
@@ -41,6 +63,7 @@ Open PostgreSQL Management, then use the SQL editor to run:
 
 1. The schema SQL from the private schema file.
 2. The template import SQL from the private template import file.
+3. If preparing Afdian platform sales-test validation, run the private Afdian codes import SQL. It inserts HMAC digests only and uses `ON CONFLICT DO NOTHING`.
 
 If the SQL editor rejects a large paste or times out, use the chunked files instead:
 
