@@ -22,7 +22,12 @@ class CollectionStub {
 }
 
 class MinimalCloudBaseDatabase implements CloudBaseDatabase {
-  readonly command = { inc: (value: number) => ({ $inc: value }) };
+  readonly command = {
+    gt: (value: unknown) => ({ $gt: value }),
+    lte: (value: unknown) => ({ $lte: value }),
+    lt: (value: unknown) => ({ $lt: value }),
+    inc: (value: number) => ({ $inc: value }),
+  };
   collection(): unknown { return new CollectionStub(); }
 }
 

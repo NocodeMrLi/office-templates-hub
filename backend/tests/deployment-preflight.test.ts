@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,15 +15,32 @@ describe("runDeploymentPreflight", () => {
         schema_version: "cloudbase-import-bundle/v1",
         summary: { templates: 2, codes: 0 },
       }));
+      const templatesJsonl = [
+        JSON.stringify({ _id: "tpl_1", public_id: "tpl_1" }),
+        JSON.stringify({ _id: "tpl_2", public_id: "tpl_2" }),
+      ].join("\n") + "\n";
+      const codesJsonl = "";
       writeFileSync(join(dir, "manifest.json"), JSON.stringify({
         schema_version: "cloudbase-import-export/v1",
         collections: [
-          { name: "templates", file: "templates.json", count: 2, sha256: "a".repeat(64) },
-          { name: "codes", file: "codes.json", count: 0, sha256: "b".repeat(64) },
+          {
+            name: "templates",
+            file: "templates.json",
+            format: "json_lines",
+            count: 2,
+            sha256: createHash("sha256").update(templatesJsonl).digest("hex"),
+          },
+          {
+            name: "codes",
+            file: "codes.json",
+            format: "json_lines",
+            count: 0,
+            sha256: createHash("sha256").update(codesJsonl).digest("hex"),
+          },
         ],
       }));
-      writeFileSync(join(dir, "templates.json"), "[]");
-      writeFileSync(join(dir, "codes.json"), "[]");
+      writeFileSync(join(dir, "templates.json"), templatesJsonl);
+      writeFileSync(join(dir, "codes.json"), codesJsonl);
 
       const report = runDeploymentPreflight({
         commitSha: "c".repeat(40),

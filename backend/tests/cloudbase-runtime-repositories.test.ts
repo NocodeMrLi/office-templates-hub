@@ -13,7 +13,11 @@ interface RecordingCollection {
 
 class FakeCloudBaseDatabase implements CloudBaseDatabase {
   readonly collections = new Map<string, RecordingCollection>();
+  readonly failingCollections = new Set<string>();
   readonly command = {
+    gt: (value: unknown) => ({ $gt: value }),
+    lte: (value: unknown) => ({ $lte: value }),
+    lt: (value: unknown) => ({ $lt: value }),
     inc: (value: number) => ({ $inc: value }),
   };
 
@@ -39,10 +43,20 @@ class FakeCloudBaseDatabase implements CloudBaseDatabase {
       },
       where: (filter: unknown) => ({
         get: async () => {
+          if (this.failingCollections.has(name)) {
+            throw new Error("CloudBase query failed");
+          }
           record.calls.push({ op: "where.get", args: [filter] });
           return { data: record.result ? [record.result] : [] };
         },
         limit: (n: number) => ({
+          get: async () => {
+            if (this.failingCollections.has(name)) {
+              throw new Error("CloudBase query failed");
+            }
+            record.calls.push({ op: "where.limit.get", args: [filter, n] });
+            return { data: record.result ? [record.result] : [] };
+          },
           update: async (patch: unknown) => {
             record.calls.push({ op: "where.limit.update", args: [filter, n, patch] });
             return { updated: 1 };
@@ -53,22 +67,6 @@ class FakeCloudBaseDatabase implements CloudBaseDatabase {
           return { updated: 1 };
         },
       }),
-      findActive: async (deviceId: string, at: string) => {
-        record.calls.push({ op: "findActive", args: [deviceId, at] });
-        return record.result ?? null;
-      },
-      consumeOne: async (deviceId: string, date: string, limit: number) => {
-        record.calls.push({ op: "consumeOne", args: [deviceId, date, limit] });
-        return { allowed: true, used: 1 };
-      },
-      findOne: async (filter: unknown) => {
-        record.calls.push({ op: "findOne", args: [filter] });
-        return record.result ?? null;
-      },
-      insertIfAbsent: async (document: unknown) => {
-        record.calls.push({ op: "insertIfAbsent", args: [document] });
-        return { inserted: true };
-      },
     };
   }
 }
@@ -114,10 +112,18 @@ describe("CloudBase runtime repository adapter", () => {
 
     expect(result).toEqual({ deviceId: "device-1", deviceSecret: "secret-1" });
     expect(createCalls).toBe(1);
-    expect(db.collections.get("registration_results")!.calls.map((call) => call.op)).toEqual(["findOne", "insertIfAbsent"]);
+    expect(db.collections.get("registration_results")!.calls.map((call) => call.op)).toEqual(["where.get", "add"]);
     expect(db.collections.get("registration_results")!.calls[1]).toEqual({
-      op: "insertIfAbsent",
+      op: "add",
       args: [{ idempotency_key: "register-key-1", device_id: "device-1", device_secret: "secret-1" }],
     });
+  });
+
+  test("reports CloudBase database unavailable when the health probe cannot query templates", async () => {
+    const db = new FakeCloudBaseDatabase();
+    db.failingCollections.add("templates");
+    const repositories = createRuntimeRepositoriesForCloudBase(db);
+
+    await expect(repositories.health()).resolves.toBe("unavailable");
   });
 });

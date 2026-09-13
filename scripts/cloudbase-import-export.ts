@@ -13,6 +13,7 @@ export interface CloudBaseImportExportOptions {
 export interface CloudBaseImportExportCollection {
   name: "templates" | "codes";
   file: string;
+  format: "json_lines";
   count: number;
   sha256: string;
 }
@@ -57,13 +58,22 @@ function writeCollection(
 ): CloudBaseImportExportCollection {
   const file = `${name}.json`;
   const path = join(outDir, file);
-  const content = writeJson(path, items);
+  const content = writeJsonLines(path, items);
   return {
     name,
     file,
+    format: "json_lines",
     count: items.length,
     sha256: createHash("sha256").update(content).digest("hex"),
   };
+}
+
+function writeJsonLines(path: string, items: Array<Record<string, unknown>>): string {
+  const content = items.length > 0
+    ? `${items.map((item) => JSON.stringify(item)).join("\n")}\n`
+    : "";
+  writeFileSync(path, content);
+  return content;
 }
 
 function writeJson(path: string, value: unknown): string {

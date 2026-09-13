@@ -43,10 +43,11 @@ describe("runMigrations", () => {
     expect(store.collections.get("templates")).toContain("public_id");
     expect(store.collections.get("devices")).toContain("device_id");
     expect(store.collections.get("codes")).toContain("code_digest");
-    expect(store.collections.get("entitlements")).toContain("device_id");
+    expect(store.collections.get("entitlements")).toContain("source_order_id");
     expect(store.collections.get("usage_daily")).toContain("device_id+date");
-    expect(store.collections.get("ip_daily")).toContain("ip_digest+date");
+    expect(store.collections.get("recovery_codes")).toContain("recovery_digest");
     expect(store.collections.get("download_events")).toContain("device_id+idempotency_key");
+    expect(store.collections.get("registration_results")).toContain("idempotency_key");
     expect(result.applied).toEqual(["001-initial-schema"]);
   });
 

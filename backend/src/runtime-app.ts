@@ -31,6 +31,7 @@ import { DocumentStoreRecoveryCodeRepository } from "./infrastructure/document-s
 import { DocumentStoreRegistrationResultStore } from "./infrastructure/document-store-registration-result-store.js";
 import { DocumentStoreDownloadTemplateRepository } from "./infrastructure/document-store-template-repository.js";
 import { DocumentStoreUsageQuotaRepository } from "./infrastructure/document-store-usage-quota-repository.js";
+import { adaptCloudBaseCollection, type CloudBaseCommand } from "./infrastructure/document-store-cloudbase-adapter.js";
 
 export interface CloudBaseClient {
   database(): CloudBaseDatabase;
@@ -38,9 +39,7 @@ export interface CloudBaseClient {
 
 export interface CloudBaseDatabase {
   collection(name: string): unknown;
-  command: {
-    inc(value: number): unknown;
-  };
+  command: CloudBaseCommand;
 }
 
 import { UsageQuotaService, type EntitlementRecord, type UsageQuotaRepository } from "./domain/usage-quota-service.js";
@@ -154,25 +153,38 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
 }
 
 export function createRuntimeRepositoriesForCloudBase(database: CloudBaseDatabase): RuntimeRepositories {
+  const templatesCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "templates"));
+  const devicesCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "devices"));
+  const entitlementsCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "entitlements"), {
+    command: database.command,
+  });
+  const usageDailyCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "usage_daily"), {
+    command: database.command,
+  });
+  const recoveryCodesCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "recovery_codes"));
+  const codesCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "codes"));
+  const downloadEventsCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "download_events"));
+  const registrationResultsCollection = adaptCloudBaseCollection(cloudBaseCollection(database, "registration_results"));
+
   const templates = new DocumentStoreDownloadTemplateRepository(
-    database.collection("templates") as DocumentStoreTemplateCollection,
+    templatesCollection as DocumentStoreTemplateCollection,
   );
   const devices = new DocumentStoreDeviceRepository(
-    database.collection("devices") as DocumentStoreDeviceCollection,
+    devicesCollection as DocumentStoreDeviceCollection,
   );
   const entitlementsAndUsage = new DocumentStoreUsageQuotaRepository(
-    database.collection("entitlements") as DocumentStoreEntitlementCollection,
-    database.collection("usage_daily") as DocumentStoreUsageDailyCollection,
+    entitlementsCollection as DocumentStoreEntitlementCollection,
+    usageDailyCollection as DocumentStoreUsageDailyCollection,
   );
   const recoveryCodes = new DocumentStoreRecoveryCodeRepository(
-    database.collection("recovery_codes") as DocumentStoreRecoveryCodeCollection,
+    recoveryCodesCollection as DocumentStoreRecoveryCodeCollection,
   );
-  const codes = new DocumentStoreCodeRepository(database.collection("codes") as DocumentStoreCodeCollection);
+  const codes = new DocumentStoreCodeRepository(codesCollection as DocumentStoreCodeCollection);
   const downloadEvents = new DocumentStoreDownloadEventRepository(
-    database.collection("download_events") as DocumentStoreDownloadEventCollection,
+    downloadEventsCollection as DocumentStoreDownloadEventCollection,
   );
   const registrationResults = new DocumentStoreRegistrationResultStore(
-    database.collection("registration_results") as DocumentStoreRegistrationResultCollection,
+    registrationResultsCollection as DocumentStoreRegistrationResultCollection,
   );
 
   return {
@@ -184,8 +196,23 @@ export function createRuntimeRepositoriesForCloudBase(database: CloudBaseDatabas
     downloadEvents,
     registrationResults,
     templates,
-    health: async () => "ok",
+    health: async () => probeCloudBaseHealth(templatesCollection),
   };
+}
+
+function cloudBaseCollection(database: CloudBaseDatabase, name: string) {
+  return database.collection(name) as Parameters<typeof adaptCloudBaseCollection>[0];
+}
+
+async function probeCloudBaseHealth(
+  templates: ReturnType<typeof adaptCloudBaseCollection>,
+): Promise<"ok" | "unavailable"> {
+  try {
+    await templates.findOne({ status: "active" });
+    return "ok";
+  } catch {
+    return "unavailable";
+  }
 }
 
 export function createInMemoryRuntimeRepositories(): RuntimeRepositories {

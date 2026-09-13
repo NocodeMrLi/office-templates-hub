@@ -30,11 +30,11 @@ interface CloudBaseLikeCollection {
   where(filter: AnyRecord): {
     get(): Promise<{ data: unknown[] }>;
     update(patch: AnyRecord): Promise<{ updated: number }>;
-    limit(n: number): { update(patch: AnyRecord): Promise<{ updated: number }> };
+    limit(n: number): {
+      get(): Promise<{ data: unknown[] }>;
+      update(patch: AnyRecord): Promise<{ updated: number }>;
+    };
   };
-  findActive(deviceId: string, at: string): Promise<unknown | null>;
-  consumeOne(deviceId: string, date: string, limit: number): Promise<{ allowed: boolean; used: number }>;
-  insertIfAbsent(document: AnyRecord): Promise<{ inserted: boolean }>;
 }
 
 class CloudBaseStubCollection implements CloudBaseLikeCollection {
@@ -72,34 +72,44 @@ class CloudBaseStubCollection implements CloudBaseLikeCollection {
         return { updated: 1 };
       },
       limit: (n: number) => ({
+        get: async () => {
+          this.calls.push({ op: "where.limit.get", args: [filter, n] });
+          return { data: this.result ? [this.result] : [] };
+        },
         update: async (patch: AnyRecord) => {
           this.calls.push({ op: "where.limit.update", args: [filter, n, patch] });
+          if (isRecord(this.result)) {
+            for (const [key, value] of Object.entries(patch)) {
+              if (isRecord(value) && typeof value.$inc === "number") {
+                const current = this.result[key];
+                this.result[key] = (typeof current === "number" ? current : 0) + value.$inc;
+              } else {
+                this.result[key] = value;
+              }
+            }
+          }
           return { updated: 1 };
         },
       }),
     };
   }
+}
 
-  async findActive(deviceId: string, at: string) {
-    this.calls.push({ op: "findActive", args: [deviceId, at] });
-    return this.result;
-  }
-
-  async consumeOne(deviceId: string, date: string, limit: number) {
-    this.calls.push({ op: "consumeOne", args: [deviceId, date, limit] });
-    return { allowed: true, used: 1 };
-  }
-
-  async insertIfAbsent(document: AnyRecord) {
-    this.calls.push({ op: "insertIfAbsent", args: [document] });
-    return { inserted: true };
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function makeAdapter<T>(cls: new (collection: never) => T): { adapter: T; stub: CloudBaseStubCollection } {
   const stub = new CloudBaseStubCollection();
-  return { adapter: new cls(adaptCloudBaseCollection(stub) as never), stub };
+  return { adapter: new cls(adaptCloudBaseCollection(stub, { command: cloudBaseCommand }) as never), stub };
 }
+
+const cloudBaseCommand = {
+  gt: (value: unknown) => ({ $gt: value }),
+  lte: (value: unknown) => ({ $lte: value }),
+  lt: (value: unknown) => ({ $lt: value }),
+  inc: (value: number) => ({ $inc: value }),
+};
 
 describe("document store adapters against CloudBase-shaped SDK", () => {
   test("template repository uses doc.get and maps the active template", async () => {
@@ -203,8 +213,11 @@ describe("document store adapters against CloudBase-shaped SDK", () => {
     const entitlementStub = new CloudBaseStubCollection();
     const usageDailyStub = new CloudBaseStubCollection();
     const adapter = new DocumentStoreUsageQuotaRepository(
-      adaptCloudBaseCollection(entitlementStub) as never,
-      adaptCloudBaseCollection(usageDailyStub) as never,
+      adaptCloudBaseCollection(entitlementStub, { command: cloudBaseCommand }) as never,
+      adaptCloudBaseCollection(usageDailyStub, {
+        command: cloudBaseCommand,
+        now: () => new Date("2026-09-13T01:00:00.000Z"),
+      }) as never,
     );
     entitlementStub.result = {
       device_id: "device-1",
@@ -217,8 +230,37 @@ describe("document store adapters against CloudBase-shaped SDK", () => {
     const repo = adapter as InstanceType<typeof DocumentStoreUsageQuotaRepository>;
     const entitlement = await repo.findActiveEntitlement("device-1", new Date("2026-09-20T00:00:00.000Z"));
     expect(entitlement).toMatchObject({ deviceId: "device-1", source: "afdian" });
+    expect(entitlementStub.calls.at(-1)).toEqual({
+      op: "where.limit.get",
+      args: [
+        {
+          device_id: "device-1",
+          status: "active",
+          starts_at: { $lte: "2026-09-20T00:00:00.000Z" },
+          expires_at: { $gt: "2026-09-20T00:00:00.000Z" },
+        },
+        1,
+      ],
+    });
+    usageDailyStub.result = { device_id: "device-1", date: "2026-09-13", used: 1 };
     const consumption = await repo.consumeDaily("device-1", "2026-09-13", 5);
-    expect(consumption).toEqual({ allowed: true, used: 1 });
+    expect(consumption).toEqual({ allowed: true, used: 2 });
+    expect(usageDailyStub.calls.map((call) => call.op)).toEqual([
+      "where",
+      "where.limit.get",
+      "where",
+      "where.limit.update",
+      "where",
+      "where.limit.get",
+    ]);
+    expect(usageDailyStub.calls[3]).toEqual({
+      op: "where.limit.update",
+      args: [
+        { device_id: "device-1", date: "2026-09-13", used: { $lt: 5 } },
+        1,
+        { limit: 5, used: { $inc: 1 }, updated_at: "2026-09-13T01:00:00.000Z" },
+      ],
+    });
   });
 
   test("registration result store reuses an existing CloudBase document", async () => {

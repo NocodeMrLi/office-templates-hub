@@ -4,9 +4,9 @@ export const COLLECTIONS = [
   "codes",
   "entitlements",
   "usage_daily",
-  "ip_daily",
+  "recovery_codes",
   "download_events",
-  "complaints",
+  "registration_results",
 ] as const;
 
 export interface MigrationStore {
@@ -25,11 +25,11 @@ const INITIAL_UNIQUE_INDEXES: Readonly<Record<(typeof COLLECTIONS)[number], read
   templates: [["public_id"]],
   devices: [["device_id"]],
   codes: [["code_digest"]],
-  entitlements: [["device_id"]],
+  entitlements: [["source_order_id"]],
   usage_daily: [["device_id", "date"]],
-  ip_daily: [["ip_digest", "date"]],
+  recovery_codes: [["recovery_digest"]],
   download_events: [["device_id", "idempotency_key"]],
-  complaints: [],
+  registration_results: [["idempotency_key"]],
 };
 
 const INITIAL_SCHEMA_ID = "001-initial-schema";

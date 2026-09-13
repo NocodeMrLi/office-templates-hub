@@ -22,22 +22,25 @@ describe("exportCloudBaseImportCollections", () => {
           {
             name: "templates",
             file: "templates.json",
+            format: "json_lines",
             count: 1,
             sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
           },
           {
             name: "codes",
             file: "codes.json",
+            format: "json_lines",
             count: 0,
             sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
           },
         ],
         manifest_file: "manifest.json",
       });
-      expect(JSON.parse(readFileSync(join(outDir, "templates.json"), "utf8"))).toEqual([
+      const templateLines = readFileSync(join(outDir, "templates.json"), "utf8").trim().split("\n");
+      expect(templateLines.map((line) => JSON.parse(line))).toEqual([
         { _id: "tpl_alpha", public_id: "tpl_alpha", display_name: "变更表" },
       ]);
-      expect(JSON.parse(readFileSync(join(outDir, "codes.json"), "utf8"))).toEqual([]);
+      expect(readFileSync(join(outDir, "codes.json"), "utf8")).toBe("");
       expect(JSON.parse(readFileSync(join(outDir, "manifest.json"), "utf8"))).toEqual({
         schema_version: "cloudbase-import-export/v1",
         source_schema_version: "cloudbase-import-bundle/v1",

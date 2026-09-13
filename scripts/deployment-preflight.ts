@@ -1,4 +1,5 @@
-import { accessSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -37,6 +38,7 @@ interface CloudBaseBundleLike {
 interface CloudBaseExportCollectionLike {
   name?: unknown;
   file?: unknown;
+  format?: unknown;
   count?: unknown;
   sha256?: unknown;
 }
@@ -158,11 +160,22 @@ function validateExportCollectionFiles(
   return collections.map((collection) => {
     const file = String(collection.file);
     try {
-      accessSync(join(exportDir, file));
+      const content = readFileSync(join(exportDir, file), "utf8");
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      if (sha256 !== collection.sha256) {
+        throw new Error(`sha256 mismatch for ${file}`);
+      }
+      const lines = content.split("\n").filter((line) => line.trim().length > 0);
+      for (const line of lines) {
+        JSON.parse(line) as unknown;
+      }
+      if (lines.length !== collection.count) {
+        throw new Error(`line count mismatch for ${file}: expected ${String(collection.count)}, got ${lines.length}`);
+      }
       return {
         name: `cloudbase_export_file_${String(collection.name)}`,
         passed: true,
-        detail: file,
+        detail: `${file}: json_lines=${lines.length}, sha256=${sha256}`,
       };
     } catch (error) {
       return {
@@ -182,6 +195,7 @@ function validateEnvExample(envExamplePath: string): DeploymentPreflightCheck {
       "DEVICE_SECRET_PEPPER",
       "CODE_SECRET_PEPPER",
       "RECOVERY_SECRET_PEPPER",
+      "CLOUDBASE_ENV_ID",
       "COS_SECRET_ID",
       "COS_SECRET_KEY",
       "COS_BUCKET",
@@ -224,6 +238,9 @@ function validateCollectionEntry(collection: unknown): asserts collection is Clo
   }
   if (typeof collection.file !== "string" || !collection.file.endsWith(".json")) {
     throw new Error(`collection ${String(collection.name)} file must be a JSON filename`);
+  }
+  if (collection.format !== "json_lines") {
+    throw new Error(`collection ${String(collection.name)} format must be json_lines`);
   }
   if (!Number.isInteger(collection.count) || Number(collection.count) < 0) {
     throw new Error(`collection ${String(collection.name)} count must be a non-negative integer`);

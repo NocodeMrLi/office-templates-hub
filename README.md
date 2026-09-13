@@ -16,6 +16,11 @@ Implemented locally:
 - idempotent `POST /api/device/register`, including concurrent retry coalescing;
 - dependency-aware `GET /api/health`;
 - validated and paginated public catalog domain service;
+- `POST /api/search`, `POST /api/download`, `POST /api/redeem`, and `POST /api/recover` domain flows;
+- COS download signing adapter and local degraded mode when COS is intentionally not configured;
+- CloudBase collection adapter for the runtime database repositories;
+- template and redemption-code import tooling for private CloudBase data handoff;
+- production build, production health smoke, Dockerfile, and deployment preflight checks;
 - public-repository scanning for spreadsheet binaries, private fields, local paths, and Tencent secret IDs.
 
 Planned API surface:
@@ -38,3 +43,5 @@ pnpm verify
 ```
 
 Copy `.env.example` to a local secret-managed environment. Never commit real credentials, redemption codes, recovery codes, object keys, signed URLs, or `.xlsx` files.
+
+CloudBase deployment handoff steps are documented in [docs/cloudbase-deployment-runbook.md](docs/cloudbase-deployment-runbook.md).
