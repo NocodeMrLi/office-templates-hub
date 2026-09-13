@@ -23,6 +23,7 @@ export function readRuntimeConfigFromEnv(env: Env): RuntimeServerConfig {
       devicePepper: requiredEnv(env, "DEVICE_SECRET_PEPPER"),
       codePepper: requiredEnv(env, "CODE_SECRET_PEPPER"),
       recoveryPepper: requiredEnv(env, "RECOVERY_SECRET_PEPPER"),
+      ...readCloudBaseConfig(env),
       ...readCosConfig(env),
     },
   };
@@ -34,6 +35,14 @@ function requiredEnv(env: Env, name: string): string {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function readCloudBaseConfig(env: Env): Pick<RuntimeAppOptions, "cloudbase"> | Record<string, never> {
+  const envId = env.CLOUDBASE_ENV_ID;
+  if (!envId) {
+    return {};
+  }
+  return { cloudbase: { envId } };
 }
 
 function readCosConfig(env: Env): Pick<RuntimeAppOptions, "cos"> | Record<string, never> {

@@ -24,15 +24,47 @@ import {
 } from "./domain/recovery-service.js";
 import { RedeemService, type CodeRecord, type CodeRepository } from "./domain/redeem-service.js";
 import { SearchService } from "./domain/search-service.js";
+import { DocumentStoreCodeRepository } from "./infrastructure/document-store-code-repository.js";
+import { DocumentStoreDeviceRepository } from "./infrastructure/document-store-device-repository.js";
+import { DocumentStoreDownloadEventRepository } from "./infrastructure/document-store-download-event-repository.js";
+import { DocumentStoreRecoveryCodeRepository } from "./infrastructure/document-store-recovery-code-repository.js";
+import { DocumentStoreRegistrationResultStore } from "./infrastructure/document-store-registration-result-store.js";
+import { DocumentStoreDownloadTemplateRepository } from "./infrastructure/document-store-template-repository.js";
+import { DocumentStoreUsageQuotaRepository } from "./infrastructure/document-store-usage-quota-repository.js";
+
+export interface CloudBaseClient {
+  database(): CloudBaseDatabase;
+}
+
+export interface CloudBaseDatabase {
+  collection(name: string): unknown;
+  command: {
+    inc(value: number): unknown;
+  };
+}
+
 import { UsageQuotaService, type EntitlementRecord, type UsageQuotaRepository } from "./domain/usage-quota-service.js";
+import type { DocumentStoreTemplateCollection } from "./infrastructure/document-store-template-repository.js";
+import type { DocumentStoreDeviceCollection } from "./infrastructure/document-store-device-repository.js";
+import type { DocumentStoreEntitlementCollection, DocumentStoreUsageDailyCollection } from "./infrastructure/document-store-usage-quota-repository.js";
+import type { DocumentStoreRecoveryCodeCollection } from "./infrastructure/document-store-recovery-code-repository.js";
+import type { DocumentStoreCodeCollection } from "./infrastructure/document-store-code-repository.js";
+import type { DocumentStoreDownloadEventCollection } from "./infrastructure/document-store-download-event-repository.js";
+import type { DocumentStoreRegistrationResultCollection } from "./infrastructure/document-store-registration-result-store.js";
 
 export interface RuntimeAppOptions {
   catalogPath?: string;
   devicePepper: string;
   codePepper: string;
   recoveryPepper: string;
+  cloudbase?: RuntimeCloudBaseOptions;
   cos?: RuntimeCosOptions;
   repositories?: RuntimeRepositories;
+}
+
+export interface RuntimeCloudBaseOptions {
+  envId: string;
+  client?: CloudBaseClient;
 }
 
 export interface RuntimeEntitlementRepository extends DownloadEntitlementRepository {
@@ -73,7 +105,11 @@ interface CatalogSource {
 
 export async function createRuntimeApp(options: RuntimeAppOptions) {
   const catalogSource = readCatalog(options.catalogPath);
-  const repositories = options.repositories ?? createInMemoryRuntimeRepositories();
+  const repositories = options.repositories ?? (options.cloudbase
+    ? createRuntimeRepositoriesForCloudBase(
+        options.cloudbase.client?.database() ?? createCloudBaseClient(options.cloudbase.envId).database(),
+      )
+    : createInMemoryRuntimeRepositories());
   const devices = repositories.devices;
   const entitlements = repositories.entitlements;
   const usage = repositories.usage;
@@ -117,6 +153,41 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
   });
 }
 
+export function createRuntimeRepositoriesForCloudBase(database: CloudBaseDatabase): RuntimeRepositories {
+  const templates = new DocumentStoreDownloadTemplateRepository(
+    database.collection("templates") as DocumentStoreTemplateCollection,
+  );
+  const devices = new DocumentStoreDeviceRepository(
+    database.collection("devices") as DocumentStoreDeviceCollection,
+  );
+  const entitlementsAndUsage = new DocumentStoreUsageQuotaRepository(
+    database.collection("entitlements") as DocumentStoreEntitlementCollection,
+    database.collection("usage_daily") as DocumentStoreUsageDailyCollection,
+  );
+  const recoveryCodes = new DocumentStoreRecoveryCodeRepository(
+    database.collection("recovery_codes") as DocumentStoreRecoveryCodeCollection,
+  );
+  const codes = new DocumentStoreCodeRepository(database.collection("codes") as DocumentStoreCodeCollection);
+  const downloadEvents = new DocumentStoreDownloadEventRepository(
+    database.collection("download_events") as DocumentStoreDownloadEventCollection,
+  );
+  const registrationResults = new DocumentStoreRegistrationResultStore(
+    database.collection("registration_results") as DocumentStoreRegistrationResultCollection,
+  );
+
+  return {
+    devices,
+    entitlements: entitlementsAndUsage,
+    usage: entitlementsAndUsage,
+    recoveryCodes,
+    codes,
+    downloadEvents,
+    registrationResults,
+    templates,
+    health: async () => "ok",
+  };
+}
+
 export function createInMemoryRuntimeRepositories(): RuntimeRepositories {
   const entitlements = new InMemoryEntitlementRepository();
   return {
@@ -129,6 +200,14 @@ export function createInMemoryRuntimeRepositories(): RuntimeRepositories {
     registrationResults: new InMemoryRegistrationResultStore(),
     health: async () => "ok",
   };
+}
+
+function createCloudBaseClient(envId: string): CloudBaseClient {
+  const require = createRequire(import.meta.url);
+  const cloudbase = require("@cloudbase/node-sdk") as {
+    init(options: { env: string }): CloudBaseClient;
+  };
+  return cloudbase.init({ env: envId });
 }
 
 function createObjectStorage(cos: RuntimeCosOptions | undefined): {
