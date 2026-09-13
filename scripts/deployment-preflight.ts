@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,10 @@ export interface DeploymentPreflightOptions {
   bundlePath: string;
   exportDir: string;
   envExamplePath: string;
+  postgresSchemaPath?: string;
+  postgresImportSqlPath?: string;
+  postgresImportChunksDir?: string;
+  postgresExpectedTemplates?: number;
 }
 
 export interface DeploymentPreflightCheck {
@@ -62,6 +66,17 @@ export function runDeploymentPreflight(options: DeploymentPreflightOptions): Dep
   }
 
   checks.push(validateEnvExample(options.envExamplePath));
+
+  if (options.postgresSchemaPath) {
+    checks.push(validatePostgresSchema(options.postgresSchemaPath));
+  }
+  if (options.postgresImportSqlPath) {
+    checks.push(validatePostgresImportSql(options.postgresImportSqlPath, options.postgresExpectedTemplates));
+  }
+  if (options.postgresImportChunksDir) {
+    checks.push(validatePostgresImportChunks(options.postgresImportChunksDir, options.postgresExpectedTemplates));
+  }
+
   checks.push(validateDocker(options.dockerAvailable));
 
   return {
@@ -231,6 +246,99 @@ function validateDocker(dockerAvailable: boolean): DeploymentPreflightCheck {
   };
 }
 
+function validatePostgresSchema(schemaPath: string): DeploymentPreflightCheck {
+  try {
+    const content = readFileSync(schemaPath, "utf8");
+    const requiredTables = [
+      "templates",
+      "devices",
+      "codes",
+      "entitlements",
+      "usage_daily",
+      "recovery_codes",
+      "download_events",
+      "registration_results",
+    ];
+    const missing = requiredTables.filter((table) => !content.includes(`CREATE TABLE IF NOT EXISTS "${table}"`));
+    if (missing.length > 0) {
+      throw new Error(`missing PostgreSQL tables: ${missing.join(", ")}`);
+    }
+    if (!content.includes("BEGIN;") || !content.includes("COMMIT;")) {
+      throw new Error("schema SQL must be transaction wrapped");
+    }
+    return { name: "postgres_schema_sql", passed: true, detail: `${schemaPath}: tables=${requiredTables.length}` };
+  } catch (error) {
+    return {
+      name: "postgres_schema_sql",
+      passed: false,
+      detail: readableError(error),
+      severity: "error",
+    };
+  }
+}
+
+function validatePostgresImportSql(importPath: string, expectedTemplates: number | undefined): DeploymentPreflightCheck {
+  try {
+    const content = readFileSync(importPath, "utf8");
+    const inserts = countPostgresTemplateInserts(content);
+    validateTransactionWrappedSql(content);
+    if (expectedTemplates !== undefined && inserts !== expectedTemplates) {
+      throw new Error(`template insert count mismatch: expected ${expectedTemplates}, got ${inserts}`);
+    }
+    return { name: "postgres_import_sql", passed: true, detail: `${importPath}: template_inserts=${inserts}` };
+  } catch (error) {
+    return {
+      name: "postgres_import_sql",
+      passed: false,
+      detail: readableError(error),
+      severity: "error",
+    };
+  }
+}
+
+function validatePostgresImportChunks(importChunksDir: string, expectedTemplates: number | undefined): DeploymentPreflightCheck {
+  try {
+    const files = readdirSync(importChunksDir)
+      .filter((file) => /^templates-\d{3}\.sql$/u.test(file))
+      .sort();
+    if (files.length === 0) {
+      throw new Error("no templates-###.sql chunks found");
+    }
+    let inserts = 0;
+    files.forEach((file, index) => {
+      const expectedName = `templates-${String(index + 1).padStart(3, "0")}.sql`;
+      if (file !== expectedName) {
+        throw new Error(`non-sequential chunk file: expected ${expectedName}, got ${file}`);
+      }
+      const content = readFileSync(join(importChunksDir, file), "utf8");
+      validateTransactionWrappedSql(content);
+      inserts += countPostgresTemplateInserts(content);
+    });
+    if (expectedTemplates !== undefined && inserts !== expectedTemplates) {
+      throw new Error(`chunk insert count mismatch: expected ${expectedTemplates}, got ${inserts}`);
+    }
+    return { name: "postgres_import_chunks", passed: true, detail: `${importChunksDir}: chunks=${files.length}, template_inserts=${inserts}` };
+  } catch (error) {
+    return {
+      name: "postgres_import_chunks",
+      passed: false,
+      detail: readableError(error),
+      severity: "error",
+    };
+  }
+}
+
+function validateTransactionWrappedSql(content: string): void {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("BEGIN;") || !trimmed.endsWith("COMMIT;")) {
+    throw new Error("SQL must be transaction wrapped");
+  }
+}
+
+function countPostgresTemplateInserts(content: string): number {
+  return content.split("\n").filter((line) => line.startsWith("INSERT INTO \"templates\" (doc) VALUES (")).length;
+}
+
 function validateCollectionEntry(collection: unknown): asserts collection is CloudBaseExportCollectionLike {
   if (!isRecord(collection)) {
     throw new Error("collection entry must be an object");
@@ -291,6 +399,23 @@ function requireArg(args: Record<string, string | boolean>, name: string): strin
   return value;
 }
 
+function optionalArg(args: Record<string, string | boolean>, name: string): string | undefined {
+  const value = args[name];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalIntegerArg(args: Record<string, string | boolean>, name: string): number | undefined {
+  const value = optionalArg(args, name);
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || String(parsed) !== value || parsed < 0) {
+    throw new Error(`Invalid --${name}: ${value}`);
+  }
+  return parsed;
+}
+
 function detectDockerAvailable(): boolean {
   const result = spawnSync("docker", ["--version"], { stdio: "ignore" });
   return result.status === 0;
@@ -303,6 +428,10 @@ function isMainModule(): boolean {
 if (isMainModule()) {
   try {
     const args = parseArgs(process.argv.slice(2));
+    const postgresSchemaPath = optionalArg(args, "postgres-schema");
+    const postgresImportSqlPath = optionalArg(args, "postgres-import-sql");
+    const postgresImportChunksDir = optionalArg(args, "postgres-import-chunks-dir");
+    const postgresExpectedTemplates = optionalIntegerArg(args, "postgres-expected-templates");
     const report = runDeploymentPreflight({
       commitSha: requireArg(args, "commit-sha"),
       verifyPassed: args["verify-passed"] === "true" || args["verify-passed"] === true,
@@ -310,6 +439,10 @@ if (isMainModule()) {
       bundlePath: requireArg(args, "bundle"),
       exportDir: requireArg(args, "export-dir"),
       envExamplePath: String(args["env-example"] ?? ".env.example"),
+      ...(postgresSchemaPath === undefined ? {} : { postgresSchemaPath }),
+      ...(postgresImportSqlPath === undefined ? {} : { postgresImportSqlPath }),
+      ...(postgresImportChunksDir === undefined ? {} : { postgresImportChunksDir }),
+      ...(postgresExpectedTemplates === undefined ? {} : { postgresExpectedTemplates }),
     });
     console.log(JSON.stringify(report, null, 2));
     if (!report.passed) {

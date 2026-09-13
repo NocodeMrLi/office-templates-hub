@@ -10,6 +10,7 @@ Generated private files:
 
 - PostgreSQL schema SQL: `/tmp/office-templates-postgres-schema.private.sql`
 - PostgreSQL template import SQL: `/tmp/office-templates-postgres-templates-import.private.sql`
+- PostgreSQL template import chunks: `/tmp/office-templates-postgres-import-chunks.private/templates-001.sql` through `templates-014.sql`
 
 These files are private local handoff artifacts. They are not committed.
 
@@ -41,12 +42,21 @@ Open PostgreSQL Management, then use the SQL editor to run:
 1. The schema SQL from the private schema file.
 2. The template import SQL from the private template import file.
 
+If the SQL editor rejects a large paste or times out, use the chunked files instead:
+
+1. Run `templates-001.sql`.
+2. Wait for success.
+3. Continue in order through `templates-014.sql`.
+4. Do not skip a number or run the same chunk twice unless the failed chunk transaction was fully rolled back.
+
 Expected result:
 
 - 8 tables exist.
 - `templates` has 1319 rows.
 - Other runtime tables exist and start empty.
 - Unique indexes exist for device IDs, template IDs, code digests, recovery digests, idempotency keys, and daily quota records.
+
+Do not paste database passwords, connection strings, secret keys, peppers, redemption codes, or recovery codes into chat when asking for help. A screenshot of a generic SQL error is okay after cropping hidden credentials.
 
 ## Verification SQL
 

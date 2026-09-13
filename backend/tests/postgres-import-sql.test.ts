@@ -28,6 +28,29 @@ describe("buildPostgresImportSql", () => {
     }
   });
 
+  test("can split JSON Lines documents into small transaction chunks", () => {
+    const dir = mkdtempSync(join(tmpdir(), "postgres-import-chunks-"));
+    try {
+      const path = join(dir, "templates.json");
+      writeFileSync(path, [
+        JSON.stringify({ _id: "tpl_1" }),
+        JSON.stringify({ _id: "tpl_2" }),
+        JSON.stringify({ _id: "tpl_3" }),
+      ].join("\n") + "\n");
+
+      const result = buildPostgresImportSql({ collection: "templates", jsonLinesPath: path, chunkSize: 2 });
+
+      expect(result.count).toBe(3);
+      expect(result.chunks).toHaveLength(2);
+      expect(result.chunks?.[0]?.count).toBe(2);
+      expect(result.chunks?.[1]?.count).toBe(1);
+      expect(result.chunks?.[0]?.sql).toContain("BEGIN;");
+      expect(result.chunks?.[0]?.sql.endsWith("COMMIT;\n")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("rejects non-object JSON Lines records", () => {
     const dir = mkdtempSync(join(tmpdir(), "postgres-import-bad-"));
     try {

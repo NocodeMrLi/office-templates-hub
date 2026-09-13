@@ -5,9 +5,17 @@ import { fileURLToPath } from "node:url";
 export interface PostgresImportSqlOptions {
   collection: string;
   jsonLinesPath: string;
+  chunkSize?: number;
 }
 
 export interface PostgresImportSqlResult {
+  sql: string;
+  count: number;
+  chunks?: PostgresImportSqlChunk[];
+}
+
+export interface PostgresImportSqlChunk {
+  index: number;
   sql: string;
   count: number;
 }
@@ -21,6 +29,26 @@ export function buildPostgresImportSql(options: PostgresImportSqlOptions): Postg
     .map((line, index) => parseJsonObject(line, index + 1));
   const inserts = documents.map((document) =>
     `INSERT INTO ${collection} (doc) VALUES (${jsonbSqlLiteral(document)});`);
+  const chunkSize = options.chunkSize;
+  if (chunkSize !== undefined) {
+    if (!Number.isInteger(chunkSize) || chunkSize < 1) {
+      throw new Error(`Invalid chunk size: ${chunkSize}`);
+    }
+    const chunks: PostgresImportSqlChunk[] = [];
+    for (let start = 0; start < inserts.length; start += chunkSize) {
+      const chunkInserts = inserts.slice(start, start + chunkSize);
+      chunks.push({
+        index: chunks.length + 1,
+        sql: `${["BEGIN;", ...chunkInserts, "COMMIT;"].join("\n")}\n`,
+        count: chunkInserts.length,
+      });
+    }
+    return {
+      sql: `${["BEGIN;", ...inserts, "COMMIT;"].join("\n")}\n`,
+      count: documents.length,
+      chunks,
+    };
+  }
   return {
     sql: `${["BEGIN;", ...inserts, "COMMIT;"].join("\n")}\n`,
     count: documents.length,
@@ -64,13 +92,31 @@ function main(): void {
   const collection = args.collection;
   const jsonLinesPath = args.jsonl;
   const out = args.out;
-  if (!collection || !jsonLinesPath || !out) {
-    throw new Error("Missing required args: --collection, --jsonl, --out");
+  const outDir = args["out-dir"];
+  const chunkSize = args["chunk-size"] ? Number.parseInt(args["chunk-size"], 10) : undefined;
+  if (!collection || !jsonLinesPath || (!out && !outDir)) {
+    throw new Error("Missing required args: --collection, --jsonl, and either --out or --out-dir");
   }
-  const result = buildPostgresImportSql({ collection, jsonLinesPath });
-  mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, result.sql);
-  console.log(JSON.stringify({ out, collection, count: result.count }));
+  const options: PostgresImportSqlOptions = chunkSize === undefined
+    ? { collection, jsonLinesPath }
+    : { collection, jsonLinesPath, chunkSize };
+  const result = buildPostgresImportSql(options);
+  const written: string[] = [];
+  if (out) {
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, result.sql);
+    written.push(out);
+  }
+  if (outDir) {
+    const chunks = result.chunks ?? buildPostgresImportSql({ collection, jsonLinesPath, chunkSize: 100 }).chunks ?? [];
+    mkdirSync(outDir, { recursive: true });
+    for (const chunk of chunks) {
+      const path = `${outDir}/${collection}-${String(chunk.index).padStart(3, "0")}.sql`;
+      writeFileSync(path, chunk.sql);
+      written.push(path);
+    }
+  }
+  console.log(JSON.stringify({ out, outDir, written, collection, count: result.count, chunks: result.chunks?.length ?? null }));
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
