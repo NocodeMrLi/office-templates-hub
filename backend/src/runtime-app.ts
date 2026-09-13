@@ -51,6 +51,7 @@ export interface RuntimeRepositories {
   codes: CodeRepository;
   downloadEvents: DownloadEventRepository;
   registrationResults: RegistrationResultStore;
+  templates?: DownloadTemplateRepository;
   downloadQuota?: DownloadQuotaService;
   health(): Promise<"ok" | "unavailable">;
 }
@@ -82,7 +83,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
   const catalogService = CatalogService.fromUnknown(catalogSource);
   const deviceService = new DeviceService(devices, options.devicePepper);
   const usageQuotaService = new UsageQuotaService(usage);
-  const templateRepository = new CatalogBackedDownloadTemplateRepository(
+  const templateRepository = repositories.templates ?? new CatalogBackedDownloadTemplateRepository(
     catalogSource.items,
     options.cos?.objectPrefix ?? "templates/",
   );
