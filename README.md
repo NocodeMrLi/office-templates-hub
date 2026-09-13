@@ -44,4 +44,5 @@ pnpm verify
 
 Copy `.env.example` to a local secret-managed environment. Never commit real credentials, redemption codes, recovery codes, object keys, signed URLs, or `.xlsx` files.
 
-CloudBase deployment handoff steps are documented in [docs/cloudbase-deployment-runbook.md](docs/cloudbase-deployment-runbook.md).
+CloudBase JSON database deployment handoff steps are documented in [docs/cloudbase-deployment-runbook.md](docs/cloudbase-deployment-runbook.md).
+CloudBase PostgreSQL deployment handoff steps are documented in [docs/postgres-deployment-runbook.md](docs/postgres-deployment-runbook.md).

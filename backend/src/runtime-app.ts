@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import type { Pool, PoolConfig } from "pg";
 
 import { buildApp, type RegistrationResultStore } from "./app.js";
 import { CatalogService, type PublicTemplate } from "./domain/catalog-service.js";
@@ -32,6 +33,10 @@ import { DocumentStoreRegistrationResultStore } from "./infrastructure/document-
 import { DocumentStoreDownloadTemplateRepository } from "./infrastructure/document-store-template-repository.js";
 import { DocumentStoreUsageQuotaRepository } from "./infrastructure/document-store-usage-quota-repository.js";
 import { adaptCloudBaseCollection, type CloudBaseCommand } from "./infrastructure/document-store-cloudbase-adapter.js";
+import {
+  DocumentStorePostgresCollection,
+  type PostgresQueryClient,
+} from "./infrastructure/document-store-postgres-adapter.js";
 
 export interface CloudBaseClient {
   database(): CloudBaseDatabase;
@@ -57,6 +62,7 @@ export interface RuntimeAppOptions {
   codePepper: string;
   recoveryPepper: string;
   cloudbase?: RuntimeCloudBaseOptions;
+  postgres?: RuntimePostgresOptions;
   cos?: RuntimeCosOptions;
   repositories?: RuntimeRepositories;
 }
@@ -64,6 +70,12 @@ export interface RuntimeAppOptions {
 export interface RuntimeCloudBaseOptions {
   envId: string;
   client?: CloudBaseClient;
+}
+
+export interface RuntimePostgresOptions {
+  connectionString: string;
+  ssl?: boolean;
+  client?: PostgresQueryClient;
 }
 
 export interface RuntimeEntitlementRepository extends DownloadEntitlementRepository {
@@ -104,7 +116,9 @@ interface CatalogSource {
 
 export async function createRuntimeApp(options: RuntimeAppOptions) {
   const catalogSource = readCatalog(options.catalogPath);
-  const repositories = options.repositories ?? (options.cloudbase
+  const repositories = options.repositories ?? (options.postgres
+    ? createRuntimeRepositoriesForPostgres(options.postgres.client ?? createPostgresClient(options.postgres))
+    : options.cloudbase
     ? createRuntimeRepositoriesForCloudBase(
         options.cloudbase.client?.database() ?? createCloudBaseClient(options.cloudbase.envId).database(),
       )
@@ -150,6 +164,63 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
     }),
     health: async () => ({ database: await repositories.health(), objectStorage: objectStorage.status }),
   });
+}
+
+export function createRuntimeRepositoriesForPostgres(client: PostgresQueryClient): RuntimeRepositories {
+  const templatesCollection = postgresCollection(client, "templates");
+  const devicesCollection = postgresCollection(client, "devices");
+  const entitlementsCollection = postgresCollection(client, "entitlements");
+  const usageDailyCollection = postgresCollection(client, "usage_daily");
+  const recoveryCodesCollection = postgresCollection(client, "recovery_codes");
+  const codesCollection = postgresCollection(client, "codes");
+  const downloadEventsCollection = postgresCollection(client, "download_events");
+  const registrationResultsCollection = postgresCollection(client, "registration_results");
+
+  const templates = new DocumentStoreDownloadTemplateRepository(
+    templatesCollection as DocumentStoreTemplateCollection,
+  );
+  const devices = new DocumentStoreDeviceRepository(
+    devicesCollection as DocumentStoreDeviceCollection,
+  );
+  const entitlementsAndUsage = new DocumentStoreUsageQuotaRepository(
+    entitlementsCollection as DocumentStoreEntitlementCollection,
+    usageDailyCollection as DocumentStoreUsageDailyCollection,
+  );
+  const recoveryCodes = new DocumentStoreRecoveryCodeRepository(
+    recoveryCodesCollection as DocumentStoreRecoveryCodeCollection,
+  );
+  const codes = new DocumentStoreCodeRepository(codesCollection as DocumentStoreCodeCollection);
+  const downloadEvents = new DocumentStoreDownloadEventRepository(
+    downloadEventsCollection as DocumentStoreDownloadEventCollection,
+  );
+  const registrationResults = new DocumentStoreRegistrationResultStore(
+    registrationResultsCollection as DocumentStoreRegistrationResultCollection,
+  );
+
+  return {
+    devices,
+    entitlements: entitlementsAndUsage,
+    usage: entitlementsAndUsage,
+    recoveryCodes,
+    codes,
+    downloadEvents,
+    registrationResults,
+    templates,
+    health: async () => probePostgresHealth(client),
+  };
+}
+
+function postgresCollection(client: PostgresQueryClient, table: string): DocumentStorePostgresCollection {
+  return new DocumentStorePostgresCollection({ table, client });
+}
+
+async function probePostgresHealth(client: PostgresQueryClient): Promise<"ok" | "unavailable"> {
+  try {
+    await client.query("SELECT 1");
+    return "ok";
+  } catch {
+    return "unavailable";
+  }
 }
 
 export function createRuntimeRepositoriesForCloudBase(database: CloudBaseDatabase): RuntimeRepositories {
@@ -235,6 +306,15 @@ function createCloudBaseClient(envId: string): CloudBaseClient {
     init(options: { env: string }): CloudBaseClient;
   };
   return cloudbase.init({ env: envId });
+}
+
+function createPostgresClient(options: RuntimePostgresOptions): PostgresQueryClient {
+  const require = createRequire(import.meta.url);
+  const pg = require("pg") as { Pool: new (config: PoolConfig) => Pool };
+  const config = options.ssl
+    ? { connectionString: options.connectionString, ssl: { rejectUnauthorized: false } }
+    : { connectionString: options.connectionString };
+  return new pg.Pool(config) as Pool;
 }
 
 function createObjectStorage(cos: RuntimeCosOptions | undefined): {

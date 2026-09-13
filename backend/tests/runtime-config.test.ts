@@ -66,6 +66,27 @@ describe("readRuntimeConfigFromEnv", () => {
     });
   });
 
+  test("reads PostgreSQL runtime options and rejects mixed database providers", () => {
+    expect(readRuntimeConfigFromEnv({
+      DEVICE_SECRET_PEPPER: "device-pepper",
+      CODE_SECRET_PEPPER: "code-pepper",
+      RECOVERY_SECRET_PEPPER: "recovery-pepper",
+      POSTGRES_URL: "postgres://user:pass@example.test:5432/app",
+      POSTGRES_SSL: "require",
+    }).app.postgres).toEqual({
+      connectionString: "postgres://user:pass@example.test:5432/app",
+      ssl: true,
+    });
+
+    expect(() => readRuntimeConfigFromEnv({
+      DEVICE_SECRET_PEPPER: "device-pepper",
+      CODE_SECRET_PEPPER: "code-pepper",
+      RECOVERY_SECRET_PEPPER: "recovery-pepper",
+      CLOUDBASE_ENV_ID: "office-templates-dev",
+      POSTGRES_URL: "postgres://user:pass@example.test:5432/app",
+    })).toThrow("Configure either POSTGRES_URL or CLOUDBASE_ENV_ID, not both");
+  });
+
   test("rejects invalid numeric deployment values", () => {
     expect(() => readRuntimeConfigFromEnv({
       PORT: "not-a-port",

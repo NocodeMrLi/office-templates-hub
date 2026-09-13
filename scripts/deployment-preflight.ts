@@ -196,6 +196,8 @@ function validateEnvExample(envExamplePath: string): DeploymentPreflightCheck {
       "CODE_SECRET_PEPPER",
       "RECOVERY_SECRET_PEPPER",
       "CLOUDBASE_ENV_ID",
+      "POSTGRES_URL",
+      "POSTGRES_SSL",
       "COS_SECRET_ID",
       "COS_SECRET_KEY",
       "COS_BUCKET",

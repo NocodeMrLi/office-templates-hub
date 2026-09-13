@@ -16,6 +16,11 @@ const COS_ENV_KEYS = [
 ] as const;
 
 export function readRuntimeConfigFromEnv(env: Env): RuntimeServerConfig {
+  const postgres = readPostgresConfig(env);
+  const cloudbase = readCloudBaseConfig(env);
+  if (postgres.postgres && cloudbase.cloudbase) {
+    throw new Error("Configure either POSTGRES_URL or CLOUDBASE_ENV_ID, not both");
+  }
   return {
     host: env.HOST ?? "127.0.0.1",
     port: readInteger(env.PORT, "PORT", 8787, 1, 65_535),
@@ -23,7 +28,8 @@ export function readRuntimeConfigFromEnv(env: Env): RuntimeServerConfig {
       devicePepper: requiredEnv(env, "DEVICE_SECRET_PEPPER"),
       codePepper: requiredEnv(env, "CODE_SECRET_PEPPER"),
       recoveryPepper: requiredEnv(env, "RECOVERY_SECRET_PEPPER"),
-      ...readCloudBaseConfig(env),
+      ...cloudbase,
+      ...postgres,
       ...readCosConfig(env),
     },
   };
@@ -43,6 +49,19 @@ function readCloudBaseConfig(env: Env): Pick<RuntimeAppOptions, "cloudbase"> | R
     return {};
   }
   return { cloudbase: { envId } };
+}
+
+function readPostgresConfig(env: Env): Pick<RuntimeAppOptions, "postgres"> | Record<string, never> {
+  const connectionString = env.POSTGRES_URL;
+  if (!connectionString) {
+    return {};
+  }
+  return {
+    postgres: {
+      connectionString,
+      ssl: env.POSTGRES_SSL === "require",
+    },
+  };
 }
 
 function readCosConfig(env: Env): Pick<RuntimeAppOptions, "cos"> | Record<string, never> {
