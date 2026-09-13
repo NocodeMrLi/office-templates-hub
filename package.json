@@ -15,9 +15,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint backend/src backend/tests",
     "scan:public": "tsx scripts/public-repo-scan.ts",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm scan:public",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm smoke:prod && pnpm scan:public",
     "build": "tsc -p tsconfig.build.json && node scripts/copy-runtime-assets.mjs",
-    "start": "node dist/backend/src/server.js"
+    "start": "node dist/backend/src/server.js",
+    "smoke:prod": "tsx scripts/production-smoke.ts"
   },
   "dependencies": {
     "cos-nodejs-sdk-v5": "^3.0.0",
