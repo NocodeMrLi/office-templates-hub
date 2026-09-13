@@ -32,6 +32,19 @@ export interface RuntimeAppOptions {
   codePepper: string;
   recoveryPepper: string;
   cos?: RuntimeCosOptions;
+  repositories?: RuntimeRepositories;
+}
+
+export interface RuntimeRepositories {
+  devices: DeviceRepository;
+  entitlements: InMemoryEntitlementRepository;
+  usage: UsageQuotaRepository;
+  recoveryCodes: RecoveryCodeRepository;
+  codes: CodeRepository;
+  downloadEvents: DownloadEventRepository;
+  registrationResults: RegistrationResultStore;
+  downloadQuota?: DownloadQuotaService;
+  health(): Promise<"ok" | "unavailable">;
 }
 
 export interface RuntimeCosOptions {
@@ -51,12 +64,13 @@ interface CatalogSource {
 
 export async function createRuntimeApp(options: RuntimeAppOptions) {
   const catalogSource = readCatalog(options.catalogPath);
-  const devices = new InMemoryDeviceRepository();
-  const entitlements = new InMemoryEntitlementRepository();
-  const usage = new InMemoryUsageQuotaRepository(entitlements);
-  const recoveryCodes = new InMemoryRecoveryCodeRepository();
-  const codeRepository = new InMemoryCodeRepository();
-  const downloadEvents = new InMemoryDownloadEventRepository();
+  const repositories = options.repositories ?? createInMemoryRuntimeRepositories();
+  const devices = repositories.devices;
+  const entitlements = repositories.entitlements;
+  const usage = repositories.usage;
+  const recoveryCodes = repositories.recoveryCodes;
+  const codeRepository = repositories.codes;
+  const downloadEvents = repositories.downloadEvents;
   const catalogService = CatalogService.fromUnknown(catalogSource);
   const deviceService = new DeviceService(devices, options.devicePepper);
   const usageQuotaService = new UsageQuotaService(usage);
@@ -68,7 +82,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
 
   return buildApp({
     deviceService,
-    registrationResults: new InMemoryRegistrationResultStore(),
+    registrationResults: repositories.registrationResults,
     catalogService,
     searchService: new SearchService(catalogSource.items),
     downloadService: new DownloadService({
@@ -79,7 +93,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
       },
       templateRepository,
       entitlements,
-      quota: new InMemoryDownloadQuotaService(entitlements),
+      quota: repositories.downloadQuota ?? new InMemoryDownloadQuotaService(entitlements),
       events: downloadEvents,
       signer: objectStorage.signer,
     }),
@@ -90,8 +104,22 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
       devicePepper: options.devicePepper,
       recoveryPepper: options.recoveryPepper,
     }),
-    health: async () => ({ database: "ok", objectStorage: objectStorage.status }),
+    health: async () => ({ database: await repositories.health(), objectStorage: objectStorage.status }),
   });
+}
+
+export function createInMemoryRuntimeRepositories(): RuntimeRepositories {
+  const entitlements = new InMemoryEntitlementRepository();
+  return {
+    devices: new InMemoryDeviceRepository(),
+    entitlements,
+    usage: new InMemoryUsageQuotaRepository(entitlements),
+    recoveryCodes: new InMemoryRecoveryCodeRepository(),
+    codes: new InMemoryCodeRepository(),
+    downloadEvents: new InMemoryDownloadEventRepository(),
+    registrationResults: new InMemoryRegistrationResultStore(),
+    health: async () => "ok",
+  };
 }
 
 function createObjectStorage(cos: RuntimeCosOptions | undefined): {
