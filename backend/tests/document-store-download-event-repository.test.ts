@@ -34,13 +34,13 @@ const deliveredEvent: DownloadEvent = {
   state: "delivered",
   createdAt: new Date("2026-09-13T00:00:00.000Z"),
   updatedAt: new Date("2026-09-13T00:00:03.000Z"),
-  reservationId: "reservation-1",
   result: {
     public_id: "tpl_001",
     download_url: "https://example.test/signed",
     expires_at: "2026-09-13T00:05:00.000Z",
     sha256: "a".repeat(64),
-    quota_remaining: 4,
+    quota_remaining: null,
+    quota_applied: false,
   },
 };
 
@@ -58,7 +58,6 @@ describe("DocumentStoreDownloadEventRepository", () => {
       state: "delivered",
       created_at: "2026-09-13T00:00:00.000Z",
       updated_at: "2026-09-13T00:00:03.000Z",
-      reservation_id: "reservation-1",
       result: deliveredEvent.result,
     });
     await expect(repository.findByDeviceAndKey("device-1", "download-key-1")).resolves.toEqual(deliveredEvent);
@@ -68,7 +67,6 @@ describe("DocumentStoreDownloadEventRepository", () => {
       idempotencyKey: deliveredEvent.idempotencyKey,
       publicId: deliveredEvent.publicId,
       createdAt: deliveredEvent.createdAt,
-      ...(deliveredEvent.reservationId ? { reservationId: deliveredEvent.reservationId } : {}),
       state: "released",
       updatedAt: new Date("2026-09-13T00:00:04.000Z"),
     };
@@ -81,7 +79,6 @@ describe("DocumentStoreDownloadEventRepository", () => {
         state: "released",
         created_at: "2026-09-13T00:00:00.000Z",
         updated_at: "2026-09-13T00:00:04.000Z",
-        reservation_id: "reservation-1",
         result: null,
       },
     });

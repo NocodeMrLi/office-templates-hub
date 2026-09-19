@@ -4,6 +4,7 @@ import { buildApp, type RegistrationResultStore } from "../src/app.js";
 import { CatalogService } from "../src/domain/catalog-service.js";
 import { DeviceService, type DeviceRecord, type DeviceRepository } from "../src/domain/device-service.js";
 import { SearchService } from "../src/domain/search-service.js";
+import { OfficeSpreadsheetEngine } from "../src/domain/office-spreadsheet-engine.js";
 
 class TestDeviceRepository implements DeviceRepository {
   readonly records = new Map<string, DeviceRecord>();
@@ -96,13 +97,22 @@ function createTestApp() {
       }],
     }),
     searchService: new SearchService(searchTemplates),
+    spreadsheetEngine: OfficeSpreadsheetEngine.fromAssets([{
+      ...searchTemplates[0],
+      variant: "standard",
+      variant_label: "标准版",
+      regulated: false,
+      compliance_review: "启用前确认",
+      object_tags: ["风险"],
+    }], "1.0.0"),
     downloadService: {
       download: async (request) => ({
         public_id: request.publicId,
         download_url: "https://signed.example/download",
         expires_at: "2026-09-12T10:05:00.000Z",
         sha256: "sha-free",
-        quota_remaining: 4,
+        quota_remaining: null,
+        quota_applied: false,
       }),
     },
     redeemService: {
@@ -139,6 +149,41 @@ function createTestApp() {
 }
 
 describe("HTTP API", () => {
+  test("resolves spreadsheet requests through the shared core engine", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/spreadsheets/resolve",
+      payload: { query: "项目风险登记表" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      decision: "direct_asset",
+      asset: {
+        public_id: "tpl_alpha000000001",
+        asset_scope: "public",
+        availability: "public_free",
+      },
+    });
+    await app.close();
+  });
+
+  test("rejects undeclared spreadsheet request fields", async () => {
+    const { app } = createTestApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/spreadsheets/resolve",
+      payload: { query: "风险表", access_tier: "paid" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "INVALID_PARAM" } });
+    await app.close();
+  });
+
   test("returns the documented error envelope when a write lacks Idempotency-Key", async () => {
     const { app } = createTestApp();
 
@@ -198,9 +243,14 @@ describe("HTTP API", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      items: [{ public_id: "tpl_alpha000000001", access_tier: "free" }],
+      items: [{
+        public_id: "tpl_alpha000000001",
+        asset_scope: "public",
+        availability: "public_free",
+      }],
       pagination: { page: 1, page_size: 1, total_items: 1, total_pages: 1 },
     });
+    expect(response.body).not.toContain("access_tier");
     await app.close();
   });
 
@@ -236,9 +286,25 @@ describe("HTTP API", () => {
       decision: "recommend",
       top_result: {
         public_id: "tpl_alpha000000001",
-        access_tier: "free",
+        asset_scope: "public",
+        availability: "public_free",
       },
     });
+    await app.close();
+  });
+
+  test("rejects the retired personal access-tier filter", async () => {
+    const { app } = createTestApp();
+
+    const catalog = await app.inject({ method: "GET", url: "/api/catalog?access_tier=paid" });
+    const search = await app.inject({
+      method: "POST",
+      url: "/api/search",
+      payload: { query: "项目风险登记表", access_tier: "paid" },
+    });
+
+    expect(catalog.statusCode).toBe(400);
+    expect(search.statusCode).toBe(400);
     await app.close();
   });
 
@@ -283,7 +349,8 @@ describe("HTTP API", () => {
       download_url: "https://signed.example/download",
       expires_at: "2026-09-12T10:05:00.000Z",
       sha256: "sha-free",
-      quota_remaining: 4,
+      quota_remaining: null,
+      quota_applied: false,
     });
     await app.close();
   });
@@ -319,6 +386,7 @@ describe("HTTP API", () => {
       registrationResults: registrations,
       catalogService: CatalogService.fromUnknown({ count: 0, items: [] }),
       searchService: new SearchService([]),
+      spreadsheetEngine: OfficeSpreadsheetEngine.fromAssets([], "1.0.0"),
       downloadService: {
         download: async () => {
           const error = new Error("quota exhausted") as Error & { code: string };

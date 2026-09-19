@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createHash } from "node:crypto";
 
 import {
   verifyCosUploadedAssets,
@@ -34,6 +35,8 @@ describe("verifyCosUploadedAssets", () => {
       total: 1,
       verified: 1,
       missing: 0,
+      unauthorized: 0,
+      unavailable: 0,
       mismatched: 0,
       failures: [],
     });
@@ -44,11 +47,11 @@ describe("verifyCosUploadedAssets", () => {
     }]);
   });
 
-  test("reports missing and mismatched objects without leaking local paths", async () => {
+  test("reports not-found and mismatched objects without leaking local paths", async () => {
     const client: CosUploadedAssetVerifierClient = {
       headObject: async (params) => {
         if (params.Key === "templates/tpl_alpha.xlsx") {
-          throw new Error("not found /private/source/path.xlsx");
+          throw Object.assign(new Error("not found /private/source/path.xlsx"), { statusCode: 404, code: "NoSuchKey" });
         }
         return {
           headers: {
@@ -85,13 +88,15 @@ describe("verifyCosUploadedAssets", () => {
       total: 2,
       verified: 0,
       missing: 1,
+      unauthorized: 0,
+      unavailable: 0,
       mismatched: 1,
       failures: [
         {
           object_key: "templates/tpl_alpha.xlsx",
           public_id: "tpl_alpha",
-          reason: "missing",
-          details: "headObject failed",
+          reason: "not_found",
+          details: "COS object not found",
         },
         {
           object_key: "templates/tpl_beta.xlsx",
@@ -100,6 +105,62 @@ describe("verifyCosUploadedAssets", () => {
           details: "size expected 10 got 9; sha256 metadata mismatch",
         },
       ],
+    });
+  });
+
+  test("classifies 403 as unauthorized rather than missing and sanitizes details", async () => {
+    const client: CosUploadedAssetVerifierClient = {
+      headObject: async () => {
+        throw Object.assign(new Error("denied secret=/private/path"), { statusCode: 403, code: "AccessDenied" });
+      },
+    };
+
+    const result = await verifyCosUploadedAssets({
+      client,
+      bucket: "office-templates-assets-1455917634",
+      region: "ap-guangzhou",
+      manifest: makeManifest(),
+    });
+
+    expect(result).toMatchObject({
+      total: 1,
+      verified: 0,
+      missing: 0,
+      unauthorized: 1,
+      unavailable: 0,
+      mismatched: 0,
+      failures: [{ reason: "unauthorized", details: "COS authorization failed" }],
+    });
+    expect(JSON.stringify(result)).not.toContain("secret=");
+    expect(JSON.stringify(result)).not.toContain("/private/path");
+  });
+
+  test("falls back to read-only object content verification when HeadObject is forbidden", async () => {
+    const body = Buffer.from("0123456789");
+    const manifest = makeManifest();
+    manifest.items[0]!.source_sha256 = createHash("sha256").update(body).digest("hex");
+    const client: CosUploadedAssetVerifierClient = {
+      headObject: async () => {
+        throw Object.assign(new Error("denied"), { statusCode: 403, code: "AccessDenied" });
+      },
+      getObject: async () => ({ Body: body }),
+    };
+
+    const result = await verifyCosUploadedAssets({
+      client,
+      bucket: "office-templates-assets-1455917634",
+      region: "ap-guangzhou",
+      manifest,
+    });
+
+    expect(result).toMatchObject({
+      total: 1,
+      verified: 1,
+      missing: 0,
+      unauthorized: 0,
+      unavailable: 0,
+      mismatched: 0,
+      failures: [],
     });
   });
 });

@@ -20,6 +20,7 @@ export interface TemplateImportData {
 }
 
 export type TemplateImportItem = PublicCatalogUploadItem & {
+  asset_scope: "public";
   object_key: string;
   object_size: number;
   object_sha256: string;
@@ -45,6 +46,7 @@ export function buildTemplateImportData(options: TemplateImportDataOptions): Tem
     }
     return {
       ...catalogItem,
+      asset_scope: "public",
       object_key: uploadItem.object_key,
       object_size: uploadItem.source_size,
       object_sha256: uploadItem.source_sha256,
@@ -95,8 +97,7 @@ function main(): void {
     out: outPath,
     count: data.count,
     active: data.items.filter((item) => item.status === "active").length,
-    free: data.items.filter((item) => item.access_tier === "free").length,
-    paid: data.items.filter((item) => item.access_tier === "paid").length,
+    public: data.items.filter((item) => item.asset_scope === "public").length,
   }));
 }
 

@@ -13,7 +13,8 @@ const DownloadResultSchema = z.object({
   download_url: z.string().min(1),
   expires_at: z.string().datetime(),
   sha256: z.string().min(1),
-  quota_remaining: z.number().int().nonnegative(),
+  quota_remaining: z.null(),
+  quota_applied: z.literal(false),
 });
 
 const DownloadEventDocumentSchema = z.object({

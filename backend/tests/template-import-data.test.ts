@@ -36,6 +36,7 @@ describe("buildTemplateImportData", () => {
         data_sensitivity: "默认不要求个人敏感信息",
         compliance_review: "业务负责人启用前确认",
         access_tier: "free",
+        asset_scope: "public",
         quality_tier: "product_pass",
         rights_status: "PASS_INDEPENDENT_REBUILD",
         object_tags: [],

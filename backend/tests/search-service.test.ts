@@ -61,18 +61,22 @@ describe("SearchService", () => {
       "tpl_risk_common",
     ]);
     expect(result.candidates[0]).toMatchObject({
-      access_tier: "paid",
+      asset_scope: "public",
+      availability: "public_free",
       match_reasons: expect.arrayContaining(["行业匹配", "意图匹配"]),
     });
   });
 
-  test("honors explicit free access filtering before ranking", () => {
+  test("does not filter public candidates by the legacy access tier", () => {
     const service = new SearchService(TEMPLATES);
 
-    const result = service.search({ query: "工程项目风险登记表", accessTier: "free", limit: 5 });
+    const result = service.search({ query: "工程项目风险登记表", limit: 5 });
 
-    expect(result.candidates.map((candidate) => candidate.public_id)).toEqual(["tpl_risk_common"]);
-    expect(result.top_result?.access_tier).toBe("free");
+    expect(result.candidates.map((candidate) => candidate.public_id)).toEqual([
+      "tpl_risk_construction",
+      "tpl_risk_common",
+    ]);
+    expect(result.top_result).toMatchObject({ asset_scope: "public", availability: "public_free" });
     expect(result.usage_decrement_allowed).toBe(false);
   });
 

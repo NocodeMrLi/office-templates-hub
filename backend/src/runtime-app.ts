@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Pool, PoolConfig } from "pg";
 
 import { buildApp, type RegistrationResultStore } from "./app.js";
-import { CatalogService, type PublicTemplate } from "./domain/catalog-service.js";
+import { CatalogService, type CatalogTemplateSource } from "./domain/catalog-service.js";
 import { DeviceService, type DeviceRecord, type DeviceRepository } from "./domain/device-service.js";
 import { CosObjectSigner, type CosGetObjectUrlClient } from "./infrastructure/cos-object-signer.js";
 import {
@@ -25,6 +25,10 @@ import {
 } from "./domain/recovery-service.js";
 import { RedeemService, type CodeRecord, type CodeRepository } from "./domain/redeem-service.js";
 import { SearchService } from "./domain/search-service.js";
+import {
+  OfficeSpreadsheetEngine,
+  PUBLIC_STANDARD_VERSION,
+} from "./domain/office-spreadsheet-engine.js";
 import { DocumentStoreCodeRepository } from "./infrastructure/document-store-code-repository.js";
 import { DocumentStoreDeviceRepository } from "./infrastructure/document-store-device-repository.js";
 import { DocumentStoreDownloadEventRepository } from "./infrastructure/document-store-download-event-repository.js";
@@ -111,7 +115,7 @@ export interface RuntimeCosOptions {
 
 interface CatalogSource {
   count: number;
-  items: PublicTemplate[];
+  items: CatalogTemplateSource[];
 }
 
 export async function createRuntimeApp(options: RuntimeAppOptions) {
@@ -143,6 +147,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
     registrationResults: repositories.registrationResults,
     catalogService,
     searchService: new SearchService(catalogSource.items),
+    spreadsheetEngine: OfficeSpreadsheetEngine.fromAssets(catalogSource.items, PUBLIC_STANDARD_VERSION),
     downloadService: new DownloadService({
       authenticator: {
         authenticate: async (deviceId, secret) => {
@@ -488,11 +493,12 @@ function chinaDayKey(date: Date): string {
 class CatalogBackedDownloadTemplateRepository implements DownloadTemplateRepository {
   private readonly templates: Map<string, DownloadTemplate>;
 
-  constructor(items: readonly PublicTemplate[], objectPrefix: string) {
+  constructor(items: readonly CatalogTemplateSource[], objectPrefix: string) {
     const normalizedObjectPrefix = normalizeObjectPrefix(objectPrefix);
     this.templates = new Map(items.map((item) => [item.public_id, {
       publicId: item.public_id,
       accessTier: item.access_tier,
+      assetScope: "public",
       objectKey: `${normalizedObjectPrefix}${item.public_id}.xlsx`,
       sha256: "not_configured",
       status: "active" as const,

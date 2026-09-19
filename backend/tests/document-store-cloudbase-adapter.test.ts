@@ -200,7 +200,8 @@ describe("document store adapters against CloudBase-shaped SDK", () => {
         download_url: "https://signed.example/x",
         expires_at: "2026-09-13T00:05:00.000Z",
         sha256: "a".repeat(64),
-        quota_remaining: 4,
+        quota_remaining: null,
+        quota_applied: false,
       },
     };
     const repo = adapter as InstanceType<typeof DocumentStoreDownloadEventRepository>;

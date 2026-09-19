@@ -8,16 +8,14 @@ const catalogPath = fileURLToPath(new URL("../../data/catalog.public.json", impo
 const source = JSON.parse(readFileSync(catalogPath, "utf8")) as { items: Record<string, unknown>[] };
 
 describe("published catalog", () => {
-  test("loads all 1,319 released public records with the documented access split", () => {
+  test("loads all 1,319 released records as public-free assets regardless of the legacy split", () => {
     const service = CatalogService.fromUnknown(source);
 
     const all = service.list({ page: 1, pageSize: 1 });
-    const free = service.list({ page: 1, pageSize: 1, accessTier: "free" });
-    const paid = service.list({ page: 1, pageSize: 1, accessTier: "paid" });
 
     expect(all.pagination.total_items).toBe(1319);
-    expect(free.pagination.total_items).toBe(500);
-    expect(paid.pagination.total_items).toBe(819);
+    expect(all.items[0]).toMatchObject({ asset_scope: "public", availability: "public_free" });
+    expect(JSON.stringify(all)).not.toContain("access_tier");
   });
 
   test("contains unique public IDs and no backend-only fields", () => {

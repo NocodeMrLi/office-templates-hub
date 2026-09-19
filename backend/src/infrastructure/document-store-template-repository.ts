@@ -9,6 +9,7 @@ export interface DocumentStoreTemplateCollection {
 const DownloadTemplateDocumentSchema = z.object({
   public_id: z.string().min(1),
   access_tier: z.enum(["free", "paid"]),
+  asset_scope: z.enum(["public", "enterprise_private"]).optional(),
   object_key: z.string().min(1),
   object_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
   status: z.literal("active"),
@@ -26,6 +27,7 @@ export class DocumentStoreDownloadTemplateRepository implements DownloadTemplate
     return {
       publicId: parsed.data.public_id,
       accessTier: parsed.data.access_tier,
+      assetScope: parsed.data.asset_scope ?? "public",
       objectKey: parsed.data.object_key,
       sha256: parsed.data.object_sha256,
       status: parsed.data.status,

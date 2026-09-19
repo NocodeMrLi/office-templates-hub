@@ -1,159 +1,71 @@
 # CloudBase Deployment Runbook
 
-This runbook describes the deployment handoff for the CloudBase runtime. It intentionally avoids real environment IDs, bucket names, credentials, signed URLs, redemption codes, and local private paths.
+This runbook covers the next deployment of the public office-spreadsheet core. It contains no real environment IDs, bucket names, credentials, signed URLs, redemption codes, or private paths.
 
-## Status Boundary
+## Current evidence boundary (2026-09-20)
 
-The repository can build and run the backend locally. The CloudBase runtime adapter, production build, Dockerfile, import bundle exporter, and deployment preflight are implemented and locally verified.
+- Local Skill, public-free catalog/download semantics, shared standards engine, resolve API, XLSX rendering, quality gate, and standard-evolution gate are implemented and locally verified.
+- CloudBase PostgreSQL has 1319 active, distinct, public-scope template records; missing scope and invalid object paths are 0.
+- COS content verification passed for 1319/1319 objects by read-only object size and SHA. The current credential cannot call `HeadObject`, so the verifier correctly falls back to read-only `GetObject`; a 403 is not reported as a missing object.
+- No CloudBase runtime service is deployed. No online API, signed-download, or user end-to-end verification exists. The product is not online.
+- Enterprise tenants, API keys, permissions/quotas/audit, MCP, and enterprise payment provisioning are not implemented.
 
-Current evidence as of 2026-09-19:
+Do not mark the service deployed until the exact candidate commit is running in the target environment. Do not mark it online verified until every cloud smoke below passes against the deployed URL.
 
-- CloudBase PostgreSQL template metadata is imported and read-only verified at 1319 active, uniquely identified records.
-- Cloud Run is unopened and no runtime service exists, so the backend is not deployed and no online API has been verified.
-- Static hosting being enabled does not prove that this project frontend or backend is deployed.
-- Current COS object verification cannot be completed because the available authorization/configuration returns HTTP 403. Historical upload evidence is not current object verification.
-- The database still contains the legacy 500/819 access split. That split is migration data, not the current personal-product entitlement policy.
-- The current backend still enforces the legacy paid tier for part of the public catalog. Do not deploy it as the upgraded personal-free product until that conflict is intentionally migrated and regressed.
+## Runtime configuration
 
-Do not mark the service as deployed until a CloudBase environment has received the exact candidate commit, the database has been migrated, object storage authorization has been verified, and cloud HTTP smoke tests have passed against the deployed URL. Do not mark it online until the upgraded personal/enterprise boundary has also passed end-to-end verification.
+Use the platform secret/environment manager for variable values:
 
-## Required User Inputs
+- `POSTGRES_URL` and `POSTGRES_SSL`, or `CLOUDBASE_ENV_ID` for the alternate JSON-database route—never both providers;
+- `DEVICE_SECRET_PEPPER`, `CODE_SECRET_PEPPER`, `RECOVERY_SECRET_PEPPER`;
+- `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_BUCKET`, `COS_REGION`, `COS_OBJECT_PREFIX`, `COS_SIGN_EXPIRES_SECONDS`;
+- `HOST`, `PORT`, `CORS_ALLOWLIST`.
 
-The user must provide only non-secret deployment facts in chat or project docs:
+Partial COS configuration fails closed. Complete secret values must never enter docs, Git, chat, prompts, screenshots, frontend code, or logs.
 
-- CloudBase environment ID.
-- CloudBase region.
-- Deployment target type: CloudBase cloud hosting or another approved Node.js container runtime.
-- Confirmation that platform secret management contains all required variable names.
-- Confirmation that the runtime service account can read and write CloudBase database collections.
-- Confirmation that the runtime service account can generate private COS download signatures.
+## Candidate preflight
 
-Never paste SecretId, SecretKey, peppers, plaintext redemption codes, or recovery codes into chat, docs, commits, screenshots, or issues.
-
-## Runtime Environment Variables
-
-Configure these in the platform secret or environment variable manager:
-
-- `DEVICE_SECRET_PEPPER`
-- `CODE_SECRET_PEPPER`
-- `RECOVERY_SECRET_PEPPER`
-- `CLOUDBASE_ENV_ID`
-- `COS_SECRET_ID`
-- `COS_SECRET_KEY`
-- `COS_BUCKET`
-- `COS_REGION`
-- `COS_OBJECT_PREFIX`
-- `COS_SIGN_EXPIRES_SECONDS`
-
-The runtime is fail-closed for partial COS configuration: either leave all core COS variables empty for local degraded mode, or set every required COS variable for deployable mode.
-
-## Local Preflight
-
-Before uploading or deploying, run:
+From a clean checkout of the exact candidate commit:
 
 ```bash
+pnpm install --frozen-lockfile
+pnpm standards:build
 pnpm verify
 pnpm tsx scripts/deployment-preflight.ts \
   --commit-sha "$(git rev-parse HEAD)" \
   --verify-passed true \
-  --bundle <private-cloudbase-import-bundle> \
-  --export-dir <private-cloudbase-import-export-dir> \
+  --bundle <private-import-bundle> \
+  --export-dir <private-import-export-dir> \
   --env-example .env.example
 ```
 
-Expected result:
+Expected: all tests/build/smoke/public scan pass; the regenerated standard snapshot has 1319 source assets and 263 standards; import artifacts and checksums match; `.env.example` contains placeholders only. A missing local Docker engine is a documented warning, not proof of an image build.
 
-- Git commit SHA is a full 40-character SHA.
-- `pnpm verify` has passed for the same commit.
-- CloudBase import bundle is parseable.
-- Export manifest exists.
-- Each exported collection file is JSON Lines, has the expected line count, and matches its SHA-256.
-- `.env.example` contains every runtime variable name and no real secret value.
-- Docker absence is allowed as a warning only when local image build verification is intentionally deferred.
+## Deployment sequence
 
-## Database Collections
+1. Confirm the worktree is clean and local HEAD equals `origin/main`.
+2. Confirm PostgreSQL aggregate evidence: total/distinct/active/public scope all 1319; missing scope and invalid object paths 0.
+3. Confirm COS full content verification is still 1319/1319.
+4. Configure runtime variables in the platform secret manager.
+5. Deploy the exact commit with `pnpm build` and `pnpm start`, or the repository Dockerfile.
+6. Record sanitized evidence: commit SHA, environment/region, deployment time, service URL, health status, and smoke results.
 
-The runtime expects these collections:
+## Online smoke gate
 
-- `templates`
-- `devices`
-- `codes`
-- `entitlements`
-- `usage_daily`
-- `recovery_codes`
-- `download_events`
-- `registration_results`
+Run against the deployed URL:
 
-Required unique indexes:
+- `GET /api/health`: database and object storage `ok`;
+- `GET /api/catalog`: public-only fields, no legacy access field or private data;
+- `POST /api/search`: public candidates without quota consumption;
+- `POST /api/spreadsheets/resolve`: exact, adapt, generate, clarify, draft, and refuse representative cases invoke the shared engine;
+- `POST /api/device/register`: idempotent retry returns one stable credential result;
+- `POST /api/download`: every sampled public asset returns a valid signed download without personal paid entitlement or legacy quota deduction;
+- downloaded size and SHA match the API response/private manifest;
+- explicit enterprise-private test records remain inaccessible;
+- repeated idempotency key with the same request is stable; changed parameters conflict.
 
-- `templates`: `public_id`
-- `devices`: `device_id`
-- `codes`: `code_digest`
-- `entitlements`: `source_order_id`
-- `usage_daily`: `device_id`, `date`
-- `recovery_codes`: `recovery_digest`
-- `download_events`: `device_id`, `idempotency_key`
-- `registration_results`: `idempotency_key`
+Retained `/api/redeem` and `/api/recover` routes are not part of the personal public primary flow. Do not configure a personal subscription product.
 
-## Import Steps
+## Do not claim without evidence
 
-Use the private export directory generated by `scripts/cloudbase-import-export.ts`.
-
-Import only non-empty collection files. The templates collection should have one JSON object per line. The codes collection can be skipped when the manifest count is `0`.
-
-For a first import into an empty collection, use Insert mode. Use Upsert only for an intentional refresh of existing records after backup and operator approval. Check the current CloudBase database import documentation before the actual console operation: <https://docs.cloudbase.net/database/manage>.
-
-After import, verify:
-
-- Imported templates count equals manifest templates count.
-- Imported codes count equals manifest codes count, or codes import is explicitly skipped because count is `0`.
-- A known public template can be found by `public_id`; any legacy access field is interpreted only according to the approved migration version.
-- The returned template document has active status, access tier, object location, and SHA-256 fields.
-- No plaintext redemption code exists in the database.
-
-## Deployment Steps
-
-1. Confirm local worktree is clean and `origin/main` points to the target commit.
-2. Build from the target commit, not from an untracked or stale local directory.
-3. Configure runtime environment variables in CloudBase or the approved hosting platform.
-4. Deploy the Node.js production service with `pnpm build` and `pnpm start`, or with the repository Dockerfile when the platform builds containers.
-5. Record the deployed URL, commit SHA, environment ID, region, and deployment time in the private project handoff record.
-
-## Cloud Smoke Tests
-
-Run these only against the deployed URL:
-
-- `GET /api/health` returns database `ok` and object storage `ok`.
-- `GET /api/catalog` returns public catalog data without private fields.
-- `POST /api/search` returns candidates and never consumes download quota.
-- `POST /api/device/register` returns one stable device credential set for repeated idempotency key retries.
-- `POST /api/download` with a public template returns a signed URL and expected SHA-256 without a personal paid-unlock requirement after the access-policy migration is implemented.
-- Repeating the same download idempotency key returns a stable result and does not double-consume quota.
-- Using the same download idempotency key with different parameters returns an idempotency conflict.
-- Legacy `POST /api/redeem` is not part of the personal primary flow; test it only for an explicitly approved enterprise or migration use case.
-- `POST /api/recover` is tested only with a deliberately generated recovery code.
-
-## Evidence To Record
-
-Record evidence in the private project docs, not in this public repository:
-
-- Target commit SHA.
-- Preflight output summary.
-- CloudBase environment ID and region.
-- Imported collection counts.
-- Health response dependency statuses.
-- Smoke test request timestamps and sanitized response summaries.
-- Remaining warnings, especially Docker/image verification if not executed locally.
-
-## Do Not Claim
-
-Do not claim any of the following without matching evidence:
-
-- Deployed.
-- Online verified.
-- Payment verified.
-- Production ready.
-- Released.
-- Accepted by user.
-- Personal-free migration complete.
-- Enterprise API, MCP, tenant isolation, or payment provisioning available.
+Do not claim deployed, online verified, production ready, released, user accepted, enterprise API available, MCP available, or payment available unless the corresponding deployment and end-to-end evidence exists.

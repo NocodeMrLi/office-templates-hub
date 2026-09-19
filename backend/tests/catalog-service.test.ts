@@ -101,15 +101,20 @@ describe("CatalogService", () => {
     expect(page.items.map((item) => item.public_id)).toEqual(["tpl_alpha000000001", "tpl_beta0000000002"]);
     expect(JSON.stringify(page)).not.toContain("must-not-leak");
     expect(JSON.stringify(page)).not.toContain("private/path");
+    expect(page.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ asset_scope: "public", availability: "public_free" }),
+    ]));
+    expect(JSON.stringify(page)).not.toContain("access_tier");
   });
 
-  test("filters by industry and access tier before pagination", () => {
+  test("treats both legacy access tiers as public and filters only by current product dimensions", () => {
     const service = CatalogService.fromUnknown(SOURCE);
 
-    const page = service.list({ page: 1, pageSize: 10, industry: "通用项目管理", accessTier: "free" });
+    const page = service.list({ page: 1, pageSize: 10, industry: "工程建设" });
 
-    expect(page.items.map((item) => item.public_id)).toEqual(["tpl_alpha000000001", "tpl_gamma000000003"]);
-    expect(page.pagination.total_items).toBe(2);
+    expect(page.items.map((item) => item.public_id)).toEqual(["tpl_beta0000000002"]);
+    expect(page.items[0]).toMatchObject({ asset_scope: "public", availability: "public_free" });
+    expect(page.pagination.total_items).toBe(1);
   });
 
   test("rejects a declared count that does not match the item set", () => {

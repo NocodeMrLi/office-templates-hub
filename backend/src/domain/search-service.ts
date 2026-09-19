@@ -10,14 +10,13 @@ export interface SearchableTemplate {
   purpose: string;
   output: string;
   field_names: readonly string[];
-  access_tier: "free" | "paid";
+  access_tier?: "free" | "paid";
 }
 
 export interface SearchQuery {
   query: string;
   limit: number;
   industry?: string;
-  accessTier?: "free" | "paid";
 }
 
 export interface SearchCandidate {
@@ -25,7 +24,8 @@ export interface SearchCandidate {
   display_name: string;
   intent_name: string;
   industry: string;
-  access_tier: "free" | "paid";
+  asset_scope: "public";
+  availability: "public_free";
   match_reasons: string[];
   score: number;
 }
@@ -46,7 +46,6 @@ export class SearchService {
   search(query: SearchQuery): SearchResult {
     const candidates = this.templates
       .filter((template) => query.industry === undefined || template.industry === query.industry)
-      .filter((template) => query.accessTier === undefined || template.access_tier === query.accessTier)
       .map((template) => toCandidate(template, query.query))
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || left.public_id.localeCompare(right.public_id))
@@ -103,7 +102,8 @@ function toCandidate(template: SearchableTemplate, query: string): SearchCandida
     display_name: template.display_name,
     intent_name: template.intent_name,
     industry: template.industry,
-    access_tier: template.access_tier,
+    asset_scope: "public",
+    availability: "public_free",
     match_reasons: reasons,
     score,
   };

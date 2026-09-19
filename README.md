@@ -1,42 +1,37 @@
 # Office Templates Hub
 
-Workplace spreadsheet Skill infrastructure built around professional public assets, reusable business standards, and evidence-backed quality validation.
+Office spreadsheet Skill infrastructure built around 1319 professional public assets, versioned business standards, controlled asset adaptation, standard-driven generation, and evidence-backed quality validation.
 
-The target user flow is: exact public-asset match and direct delivery; otherwise select a genuinely applicable nearby asset and adapt it; if no asset is suitable, generate from approved standards; then validate fields, structure, workflow, formulas, print layout, and compatibility. Insufficient evidence must lead to clarification, a clearly labelled draft, or refusal—not invented professional content.
+## Product flow
 
-Personal users are intended to receive the complete public capability free of charge. Enterprise payment is intended for private assets and rules, team permissions, versioning, batch work, API/MCP access, quotas, audit, private deployment, and customization. The legacy personal paid-unlock code remains in the repository for migration history and possible future enterprise reuse, but it is not the target personal product flow.
+```text
+exact public asset → direct delivery
+otherwise → verify the closest asset is genuinely applicable → adapt it
+otherwise → generate from versioned public standards
+then → validate fields, structure, workflow, formulas, print setup, and compatibility
+insufficient evidence → clarify, explicitly labelled draft, or refuse
+```
+
+Personal users receive the complete public capability free of charge. Enterprise payment is reserved for private assets and rules, team permissions, versioning, batch work, enterprise API/MCP, quotas, audit, private deployment, and customization. Retained legacy entitlement/payment code is not the personal primary flow.
 
 ## Current status
 
-Baseline audit and product-position migration are in progress. The service is **not deployed** and **not online**; payment is not enabled; template binaries are not stored in this public repository.
+**Locally implemented and verified:**
 
-Implemented locally:
+- all 1319 catalog assets are exposed as `asset_scope=public` and `availability=public_free`;
+- public downloads no longer require a personal paid entitlement or consume the legacy daily quota; explicit `enterprise_private` remains fail-closed;
+- 263 public business standards are distilled from 1319 assets in the versioned `data/standards.public.json` snapshot;
+- one `OfficeSpreadsheetEngine` handles exact delivery, applicable-asset adaptation, standard generation, clarification, labelled drafts, and refusal;
+- `POST /api/spreadsheets/resolve` and the local `skill/SKILL.md` entry call that same engine;
+- deterministic XLSX rendering and quality checks cover required fields, duplicate columns, workflow, formula safety, print settings, and Excel/WPS/LibreOffice compatibility targets;
+- new-asset standard scanning produces review candidates or `no_change` records; promotion requires approval, regression success, and a rollback version;
+- PostgreSQL/CloudBase repositories, COS signing, migrations, imports, production build/smoke, public scan, and deployment preflight remain available.
 
-- versioned, idempotent schema migration contract for eight collections;
-- device registration with a 256-bit secret and server-side HMAC digest only;
-- device authentication, disable handling, and secret rotation;
-- idempotent `POST /api/device/register`, including concurrent retry coalescing;
-- dependency-aware `GET /api/health`;
-- validated and paginated public catalog domain service;
-- local `GET /api/catalog`, `GET /api/health`, `POST /api/search`, `POST /api/download`, `POST /api/redeem`, `POST /api/recover`, and `POST /api/device/register` routes;
-- COS download signing adapter and local degraded mode when COS is intentionally not configured;
-- CloudBase collection adapter for the runtime database repositories;
-- template and redemption-code import tooling for private CloudBase data handoff;
-- production build, production health smoke, Dockerfile, and deployment preflight checks;
-- public-repository scanning for spreadsheet binaries, private fields, local paths, and Tencent secret IDs.
+**Cloud data verified:** PostgreSQL contains 1319 active public-scope template records with 1319 distinct public IDs, and all 1319 COS objects currently match the private manifest by content size and SHA.
 
-Not yet implemented:
+**Not deployed / not online:** no CloudBase runtime service or deployed URL exists, so online API and download end-to-end verification have not occurred.
 
-- installable local Skill and `SKILL.md`;
-- unified asset-standard engine shared by local Skill, HTTP API, and MCP;
-- structured standard-driven generation/adaptation and generated-output quality validation;
-- recurring new-asset scan and controlled standard-upgrade loop;
-- personal-free access to every public asset (the current runtime still enforces the legacy paid tier for some records);
-- enterprise tenants, private asset isolation, API keys, enterprise quotas/audit, and enterprise payment provisioning;
-- MCP adapter;
-- cloud deployment and online end-to-end verification.
-
-The existing HTTP routes are a local legacy backend foundation, not a released enterprise API. API is the intended core service entry point; MCP will be an Agent-facing adapter over the same engine, not a separate rule implementation.
+**Planned, not implemented:** enterprise tenants, private-asset isolation, API keys, enterprise permissions/quotas/audit, MCP adapter, and enterprise payment provisioning.
 
 ## Development
 
@@ -44,10 +39,27 @@ Requires Node.js 22+ and pnpm 11.19.0.
 
 ```bash
 pnpm install
+pnpm standards:build
 pnpm verify
 ```
 
-Copy `.env.example` to a local secret-managed environment. Never commit real credentials, redemption codes, recovery codes, signed URLs, or `.xlsx` files. Do not place API keys in a Skill file, prompt, frontend, repository, chat, or logs.
+Resolve a local Skill request:
 
-CloudBase JSON database deployment handoff steps are documented in [docs/cloudbase-deployment-runbook.md](docs/cloudbase-deployment-runbook.md).
-CloudBase PostgreSQL deployment handoff steps are documented in [docs/postgres-deployment-runbook.md](docs/postgres-deployment-runbook.md).
+```bash
+pnpm --silent skill:resolve -- --request request.json --output result.xlsx
+```
+
+Scan newly admitted assets against the active standard snapshot:
+
+```bash
+pnpm standards:scan -- data/standards.public.json new-assets.json evolution-report.json
+```
+
+A scan never publishes a standard. Candidate promotion must pass the review, regression, and rollback controls implemented by `StandardEvolutionService`.
+
+Copy `.env.example` only as a variable-name template. Never commit or print real database credentials, connection strings, SecretKey values, API keys, plaintext redemption/recovery codes, signed URLs, private import files, or `.xlsx` assets.
+
+Deployment boundaries and operator steps:
+
+- [CloudBase deployment runbook](docs/cloudbase-deployment-runbook.md)
+- [CloudBase PostgreSQL runbook](docs/postgres-deployment-runbook.md)

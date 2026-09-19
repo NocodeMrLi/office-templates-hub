@@ -1,8 +1,9 @@
+import { z } from "zod";
+
 export interface CatalogQuery {
   page: number;
   pageSize: number;
   industry?: string;
-  accessTier?: "free" | "paid";
 }
 
 const PublicTemplateSchema = z.object({
@@ -38,10 +39,14 @@ const CatalogSourceSchema = z.object({
   items: z.array(PublicTemplateSchema),
 });
 
-export type PublicTemplate = z.infer<typeof PublicTemplateSchema>;
+export type CatalogTemplateSource = z.infer<typeof PublicTemplateSchema>;
+export type PublicTemplate = Omit<CatalogTemplateSource, "access_tier"> & {
+  asset_scope: "public";
+  availability: "public_free";
+};
 
 export class CatalogService {
-  private constructor(private readonly items: readonly PublicTemplate[]) {}
+  private constructor(private readonly items: readonly CatalogTemplateSource[]) {}
 
   static fromUnknown(source: unknown): CatalogService {
     const parsed = CatalogSourceSchema.parse(source);
@@ -52,13 +57,10 @@ export class CatalogService {
   }
 
   list(query: CatalogQuery) {
-    const filtered = this.items.filter((item) =>
-      (query.industry === undefined || item.industry === query.industry)
-      && (query.accessTier === undefined || item.access_tier === query.accessTier),
-    );
+    const filtered = this.items.filter((item) => query.industry === undefined || item.industry === query.industry);
     const start = (query.page - 1) * query.pageSize;
     return {
-      items: filtered.slice(start, start + query.pageSize),
+      items: filtered.slice(start, start + query.pageSize).map(toPublicTemplate),
       pagination: {
         page: query.page,
         page_size: query.pageSize,
@@ -68,4 +70,13 @@ export class CatalogService {
     };
   }
 }
-import { z } from "zod";
+
+function toPublicTemplate(item: CatalogTemplateSource): PublicTemplate {
+  const { access_tier: legacyAccessTier, ...publicItem } = item;
+  void legacyAccessTier;
+  return {
+    ...publicItem,
+    asset_scope: "public",
+    availability: "public_free",
+  };
+}

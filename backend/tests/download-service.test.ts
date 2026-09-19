@@ -103,7 +103,38 @@ function createService(options?: {
 }
 
 describe("DownloadService", () => {
-  test("moves through the delivery states and commits quota only after a signed URL is delivered", async () => {
+  test("delivers a public asset without legacy entitlement or quota even when its compatibility tier is paid", async () => {
+    const { service, events, quota } = createService({
+      templates: [{
+        publicId: "tpl_legacy_paid_public",
+        accessTier: "paid",
+        objectKey: "private/templates/tpl_legacy_paid_public.xlsx",
+        sha256: "sha-public",
+        status: "active",
+      }],
+      entitlements: {
+        hasPaidAccess: async () => false,
+      },
+    });
+
+    const result = await service.download({
+      deviceId: "device-1",
+      deviceSecret: "secret-1",
+      idempotencyKey: "download-public-legacy-paid",
+      publicId: "tpl_legacy_paid_public",
+    });
+
+    expect(result).toMatchObject({
+      public_id: "tpl_legacy_paid_public",
+      quota_remaining: null,
+      quota_applied: false,
+    });
+    expect(events.states).toEqual(["received", "authenticated", "signed", "delivered"]);
+    expect(quota.reserves).toBe(0);
+    expect(quota.commits).toBe(0);
+  });
+
+  test("moves a public asset through delivery without applying the legacy quota", async () => {
     const { service, events, quota } = createService();
 
     const result = await service.download({
@@ -118,14 +149,16 @@ describe("DownloadService", () => {
       download_url: "https://signed.example/download",
       expires_at: "2026-09-12T10:05:00.000Z",
       sha256: "sha-free",
-      quota_remaining: 4,
+      quota_remaining: null,
+      quota_applied: false,
     });
-    expect(events.states).toEqual(["received", "authenticated", "reserved", "signed", "delivered"]);
-    expect(quota.commits).toBe(1);
+    expect(events.states).toEqual(["received", "authenticated", "signed", "delivered"]);
+    expect(quota.reserves).toBe(0);
+    expect(quota.commits).toBe(0);
     expect(quota.releases).toBe(0);
   });
 
-  test("releases reserved quota when signing fails", async () => {
+  test("records a failed public delivery without touching the legacy quota when signing fails", async () => {
     const { service, events, quota } = createService({
       signer: {
         sign: async () => {
@@ -141,9 +174,10 @@ describe("DownloadService", () => {
       publicId: "tpl_free",
     })).rejects.toEqual(new DownloadSignError());
 
-    expect(events.states).toEqual(["received", "authenticated", "reserved", "released"]);
+    expect(events.states).toEqual(["received", "authenticated", "released"]);
+    expect(quota.reserves).toBe(0);
     expect(quota.commits).toBe(0);
-    expect(quota.releases).toBe(1);
+    expect(quota.releases).toBe(0);
   });
 
   test("replays the delivered result for the same idempotency key without signing or committing again", async () => {
@@ -175,7 +209,7 @@ describe("DownloadService", () => {
 
     expect(second).toEqual(first);
     expect(signCalls).toBe(1);
-    expect(quota.commits).toBe(1);
+    expect(quota.commits).toBe(0);
   });
 
   test("rejects the same idempotency key when the request parameters change", async () => {
@@ -201,11 +235,12 @@ describe("DownloadService", () => {
     })).rejects.toEqual(new DownloadConflictError());
   });
 
-  test("requires paid entitlement before signing a paid template", async () => {
+  test("fails closed for an explicitly enterprise-private asset", async () => {
     const { service, quota } = createService({
       templates: [{
         publicId: "tpl_paid",
         accessTier: "paid",
+        assetScope: "enterprise_private",
         objectKey: "private/templates/tpl_paid.xlsx",
         sha256: "sha-paid",
         status: "active",

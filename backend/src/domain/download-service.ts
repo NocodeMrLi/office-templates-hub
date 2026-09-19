@@ -3,6 +3,7 @@ export type DownloadState = "received" | "authenticated" | "reserved" | "signed"
 export interface DownloadTemplate {
   publicId: string;
   accessTier: "free" | "paid";
+  assetScope?: "public" | "enterprise_private";
   objectKey: string;
   sha256: string;
   status: "active" | "disabled";
@@ -24,7 +25,8 @@ export interface DownloadResult {
   download_url: string;
   expires_at: string;
   sha256: string;
-  quota_remaining: number;
+  quota_remaining: null;
+  quota_applied: false;
 }
 
 export interface DownloadRequest {
@@ -147,32 +149,26 @@ export class DownloadService {
     if (!template || template.status !== "active") {
       throw new TemplateNotFoundError();
     }
-    if (template.accessTier === "paid" && !(await this.dependencies.entitlements.hasPaidAccess(request.deviceId, now))) {
+    if (template.assetScope === "enterprise_private") {
       throw new DownloadAccessError();
     }
-
-    const reservation = await this.dependencies.quota.reserve(request.deviceId, now);
-    event.reservationId = reservation.reservationId;
-    await this.saveState(event, "reserved");
-
     let signed: { url: string; expiresAt: Date };
     try {
       signed = await this.dependencies.signer.sign(template.objectKey);
     } catch {
-      await this.dependencies.quota.release(reservation.reservationId);
       await this.saveState(event, "released");
       throw new DownloadSignError();
     }
 
     await this.saveState(event, "signed");
-    await this.dependencies.quota.commit(reservation.reservationId);
 
     const result: DownloadResult = {
       public_id: template.publicId,
       download_url: signed.url,
       expires_at: signed.expiresAt.toISOString(),
       sha256: template.sha256,
-      quota_remaining: reservation.remainingAfterDelivery,
+      quota_remaining: null,
+      quota_applied: false,
     };
     event.result = result;
     await this.saveState(event, "delivered");

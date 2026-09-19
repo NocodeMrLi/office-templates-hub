@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { DeviceService } from "./domain/device-service.js";
 import type { CatalogService } from "./domain/catalog-service.js";
 import type { SearchService } from "./domain/search-service.js";
+import type { OfficeSpreadsheetEngine } from "./domain/office-spreadsheet-engine.js";
 
 interface RegistrationCredentials {
   deviceId: string;
@@ -29,7 +30,8 @@ export interface DownloadServicePort {
     download_url: string;
     expires_at: string;
     sha256: string;
-    quota_remaining: number;
+    quota_remaining: null;
+    quota_applied: false;
   }>;
 }
 
@@ -60,6 +62,7 @@ export interface AppDependencies {
   registrationResults: RegistrationResultStore;
   catalogService: CatalogService;
   searchService: SearchService;
+  spreadsheetEngine: OfficeSpreadsheetEngine;
   downloadService: DownloadServicePort;
   redeemService: RedeemServicePort;
   recoveryService: RecoveryServicePort;
@@ -74,8 +77,8 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       page: z.coerce.number().int().min(1).default(1),
       page_size: z.coerce.number().int().min(1).max(100).default(20),
       industry: z.string().min(1).optional(),
-      access_tier: z.enum(["free", "paid"]).optional(),
-    }).safeParse(request.query);
+      asset_scope: z.literal("public").optional(),
+    }).strict().safeParse(request.query);
     if (!parsed.success) {
       return reply.code(400).send(errorResponse("INVALID_PARAM", "目录筛选参数无效"));
     }
@@ -83,7 +86,6 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       page: parsed.data.page,
       pageSize: parsed.data.page_size,
       ...(parsed.data.industry === undefined ? {} : { industry: parsed.data.industry }),
-      ...(parsed.data.access_tier === undefined ? {} : { accessTier: parsed.data.access_tier }),
     });
   });
 
@@ -103,8 +105,8 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       query: z.string().trim().min(1).max(200),
       limit: z.number().int().min(1).max(10).default(3),
       industry: z.string().min(1).optional(),
-      access_tier: z.enum(["free", "paid"]).optional(),
-    }).safeParse(request.body);
+      asset_scope: z.literal("public").optional(),
+    }).strict().safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send(errorResponse("INVALID_PARAM", "搜索参数无效"));
     }
@@ -112,7 +114,28 @@ export function buildApp(dependencies: AppDependencies): FastifyInstance {
       query: parsed.data.query,
       limit: parsed.data.limit,
       ...(parsed.data.industry === undefined ? {} : { industry: parsed.data.industry }),
-      ...(parsed.data.access_tier === undefined ? {} : { accessTier: parsed.data.access_tier }),
+    });
+  });
+
+  app.post("/api/spreadsheets/resolve", async (request, reply) => {
+    const parsed = z.object({
+      query: z.string().trim().min(1).max(500),
+      industry: z.string().trim().min(1).max(100).optional(),
+      required_fields: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+      roles: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
+      regulated: z.boolean().optional(),
+      allow_draft: z.boolean().optional(),
+    }).strict().safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send(errorResponse("INVALID_PARAM", "表格需求参数无效"));
+    }
+    return dependencies.spreadsheetEngine.resolve({
+      query: parsed.data.query,
+      ...(parsed.data.industry === undefined ? {} : { industry: parsed.data.industry }),
+      ...(parsed.data.required_fields === undefined ? {} : { requiredFields: parsed.data.required_fields }),
+      ...(parsed.data.roles === undefined ? {} : { roles: parsed.data.roles }),
+      ...(parsed.data.regulated === undefined ? {} : { regulated: parsed.data.regulated }),
+      ...(parsed.data.allow_draft === undefined ? {} : { allowDraft: parsed.data.allow_draft }),
     });
   });
 
