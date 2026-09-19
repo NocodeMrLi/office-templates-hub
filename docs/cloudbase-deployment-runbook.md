@@ -6,7 +6,16 @@ This runbook describes the deployment handoff for the CloudBase runtime. It inte
 
 The repository can build and run the backend locally. The CloudBase runtime adapter, production build, Dockerfile, import bundle exporter, and deployment preflight are implemented and locally verified.
 
-Do not mark the service as deployed until a CloudBase environment has received this exact commit, the database collections have been imported or migrated, and cloud HTTP smoke tests have passed against the deployed URL.
+Current evidence as of 2026-09-19:
+
+- CloudBase PostgreSQL template metadata is imported and read-only verified at 1319 active, uniquely identified records.
+- Cloud Run is unopened and no runtime service exists, so the backend is not deployed and no online API has been verified.
+- Static hosting being enabled does not prove that this project frontend or backend is deployed.
+- Current COS object verification cannot be completed because the available authorization/configuration returns HTTP 403. Historical upload evidence is not current object verification.
+- The database still contains the legacy 500/819 access split. That split is migration data, not the current personal-product entitlement policy.
+- The current backend still enforces the legacy paid tier for part of the public catalog. Do not deploy it as the upgraded personal-free product until that conflict is intentionally migrated and regressed.
+
+Do not mark the service as deployed until a CloudBase environment has received the exact candidate commit, the database has been migrated, object storage authorization has been verified, and cloud HTTP smoke tests have passed against the deployed URL. Do not mark it online until the upgraded personal/enterprise boundary has also passed end-to-end verification.
 
 ## Required User Inputs
 
@@ -98,7 +107,7 @@ After import, verify:
 
 - Imported templates count equals manifest templates count.
 - Imported codes count equals manifest codes count, or codes import is explicitly skipped because count is `0`.
-- A known free template can be found by `public_id`.
+- A known public template can be found by `public_id`; any legacy access field is interpreted only according to the approved migration version.
 - The returned template document has active status, access tier, object location, and SHA-256 fields.
 - No plaintext redemption code exists in the database.
 
@@ -118,10 +127,10 @@ Run these only against the deployed URL:
 - `GET /api/catalog` returns public catalog data without private fields.
 - `POST /api/search` returns candidates and never consumes download quota.
 - `POST /api/device/register` returns one stable device credential set for repeated idempotency key retries.
-- `POST /api/download` with a free template returns a signed URL and expected SHA-256.
+- `POST /api/download` with a public template returns a signed URL and expected SHA-256 without a personal paid-unlock requirement after the access-policy migration is implemented.
 - Repeating the same download idempotency key returns a stable result and does not double-consume quota.
 - Using the same download idempotency key with different parameters returns an idempotency conflict.
-- `POST /api/redeem` is tested only after real platform code generation and import are approved.
+- Legacy `POST /api/redeem` is not part of the personal primary flow; test it only for an explicitly approved enterprise or migration use case.
 - `POST /api/recover` is tested only with a deliberately generated recovery code.
 
 ## Evidence To Record
@@ -146,3 +155,5 @@ Do not claim any of the following without matching evidence:
 - Production ready.
 - Released.
 - Accepted by user.
+- Personal-free migration complete.
+- Enterprise API, MCP, tenant isolation, or payment provisioning available.
