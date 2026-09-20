@@ -21,7 +21,12 @@
     "smoke:prod": "tsx scripts/production-smoke.ts",
     "skill:resolve": "tsx backend/src/skill-cli.ts",
     "standards:build": "tsx scripts/build-asset-standards.ts",
-    "standards:scan": "tsx scripts/scan-standard-evolution.ts"
+    "standards:scan": "tsx scripts/scan-standard-evolution.ts",
+    "standards:verify-active": "tsx scripts/check-active-standard.ts",
+    "standards:promote": "tsx scripts/promote-standard-snapshot.ts",
+    "standards:rollback": "tsx scripts/rollback-standard-snapshot.ts",
+    "standards:docs:sync": "tsx scripts/sync-standard-document.ts --mode sync",
+    "standards:docs:check": "tsx scripts/sync-standard-document.ts --mode check"
   },
   "dependencies": {
     "@cloudbase/node-sdk": "3.18.3",

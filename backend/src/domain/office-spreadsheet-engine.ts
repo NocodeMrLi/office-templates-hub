@@ -3,6 +3,7 @@ import {
   parseAssetsForStandards,
   type AssetForStandard,
   type BusinessStandard,
+  type StandardSnapshot,
 } from "./asset-standard-engine.js";
 import {
   SpreadsheetQualityValidator,
@@ -18,8 +19,6 @@ export interface OfficeSpreadsheetRequest {
   regulated?: boolean;
   allowDraft?: boolean;
 }
-
-export const PUBLIC_STANDARD_VERSION = "1.0.0";
 
 export type OfficeSpreadsheetDecision =
   | "direct_asset"
@@ -55,6 +54,13 @@ export class OfficeSpreadsheetEngine {
   static fromAssets(assets: readonly unknown[], version: string): OfficeSpreadsheetEngine {
     const parsed = parseAssetsForStandards(assets);
     return new OfficeSpreadsheetEngine(parsed, AssetStandardEngine.fromAssets(parsed, version));
+  }
+
+  static fromSnapshot(assets: readonly unknown[], snapshot: StandardSnapshot): OfficeSpreadsheetEngine {
+    const parsed = parseAssetsForStandards(assets);
+    const standards = AssetStandardEngine.fromSnapshot(snapshot);
+    validateSnapshotAgainstAssets(parsed, standards.snapshot());
+    return new OfficeSpreadsheetEngine(parsed, standards);
   }
 
   resolve(request: OfficeSpreadsheetRequest): OfficeSpreadsheetResult {
@@ -193,6 +199,31 @@ export class OfficeSpreadsheetEngine {
 
   private intentOptions(): string[] {
     return unique(this.assets.map((asset) => asset.intent_name)).slice(0, 3);
+  }
+}
+
+function validateSnapshotAgainstAssets(assets: readonly AssetForStandard[], snapshot: StandardSnapshot): void {
+  if (assets.length !== snapshot.source_asset_count) {
+    throw new Error("active standard snapshot does not match catalog asset count");
+  }
+  const counts = new Map<string, number>();
+  const publicIds = new Set<string>();
+  for (const asset of assets) {
+    if (publicIds.has(asset.public_id)) {
+      throw new Error(`duplicate public asset id: ${asset.public_id}`);
+    }
+    publicIds.add(asset.public_id);
+    const id = `${asset.intent}::${asset.industry}`;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  for (const standard of snapshot.standards) {
+    if (counts.get(standard.standard_id) !== standard.source_asset_count) {
+      throw new Error(`active standard snapshot does not match catalog group: ${standard.standard_id}`);
+    }
+    counts.delete(standard.standard_id);
+  }
+  if (counts.size > 0) {
+    throw new Error(`active standard snapshot is missing catalog group: ${counts.keys().next().value as string}`);
   }
 }
 

@@ -3,11 +3,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-import {
-  OfficeSpreadsheetEngine,
-  PUBLIC_STANDARD_VERSION,
-  type OfficeSpreadsheetResult,
-} from "./domain/office-spreadsheet-engine.js";
+import { parseStandardSnapshot, type StandardSnapshot } from "./domain/asset-standard-engine.js";
+import { OfficeSpreadsheetEngine, type OfficeSpreadsheetResult } from "./domain/office-spreadsheet-engine.js";
 import { SpreadsheetXlsxRenderer } from "./infrastructure/spreadsheet-xlsx-renderer.js";
 
 const SkillRequestSchema = z.object({
@@ -29,10 +26,11 @@ export interface SkillResult extends OfficeSpreadsheetResult {
 export async function resolveSkillRequest(
   input: unknown,
   assets: readonly unknown[],
+  snapshot: StandardSnapshot,
   outputPath?: string,
 ): Promise<SkillResult> {
   const request = SkillRequestSchema.parse(input);
-  const result = OfficeSpreadsheetEngine.fromAssets(assets, PUBLIC_STANDARD_VERSION).resolve({
+  const result = OfficeSpreadsheetEngine.fromSnapshot(assets, snapshot).resolve({
     query: request.query,
     ...(request.industry === undefined ? {} : { industry: request.industry }),
     ...(request.required_fields === undefined ? {} : { requiredFields: request.required_fields }),
@@ -67,20 +65,28 @@ async function main(argv: readonly string[]): Promise<void> {
   const args = parseArguments(argv);
   const request = JSON.parse(await readFile(args.request, "utf8")) as unknown;
   const catalog = JSON.parse(await readFile(args.catalog, "utf8")) as { items?: unknown[] };
+  const snapshot = parseStandardSnapshot(JSON.parse(await readFile(args.standards, "utf8")) as unknown);
   if (!Array.isArray(catalog.items)) {
     throw new Error("catalog items are missing");
   }
-  const result = await resolveSkillRequest(request, catalog.items, args.output);
+  const result = await resolveSkillRequest(request, catalog.items, snapshot, args.output);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-function parseArguments(argv: readonly string[]): { request: string; catalog: string; output?: string } {
+function parseArguments(argv: readonly string[]): {
+  request: string;
+  catalog: string;
+  standards: string;
+  output?: string;
+} {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (!flag?.startsWith("--") || !value) {
-      throw new Error("usage: --request <json> [--output <xlsx>] [--catalog <catalog.json>]");
+      throw new Error(
+        "usage: --request <json> [--output <xlsx>] [--catalog <catalog.json>] [--standards <standards.json>]",
+      );
     }
     values.set(flag, value);
   }
@@ -92,6 +98,7 @@ function parseArguments(argv: readonly string[]): { request: string; catalog: st
   return {
     request: resolve(request),
     catalog: resolve(values.get("--catalog") ?? "data/catalog.public.json"),
+    standards: resolve(values.get("--standards") ?? "data/standards.public.json"),
     ...(output ? { output: resolve(output) } : {}),
   };
 }

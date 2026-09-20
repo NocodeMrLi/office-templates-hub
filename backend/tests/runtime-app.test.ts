@@ -1,9 +1,89 @@
-import { describe, expect, test } from "vitest";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, test } from "vitest";
 
 import { createRuntimeApp } from "../src/runtime-app.js";
 import type { CosGetObjectUrlClient } from "../src/infrastructure/cos-object-signer.js";
 
 describe("createRuntimeApp", () => {
+  const temporaryDirectories: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  });
+
+  test("resolves spreadsheets from the configured active standard snapshot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "office-runtime-standards-"));
+    temporaryDirectories.push(directory);
+    const standardsPath = join(directory, "standards.public.json");
+    const snapshot = JSON.parse(await readFile("data/standards.public.json", "utf8")) as { version: string };
+    snapshot.version = "9.9.9";
+    await writeFile(standardsPath, `${JSON.stringify(snapshot)}\n`, "utf8");
+
+    const app = await createRuntimeApp({
+      devicePepper: "runtime-device-pepper",
+      codePepper: "runtime-code-pepper",
+      recoveryPepper: "runtime-recovery-pepper",
+      standardsPath,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/spreadsheets/resolve",
+      payload: {
+        query: "做一份风险登记表",
+        required_fields: ["新增验证字段", "另一个新增字段", "第三个新增字段"],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      specification: { source: { standard_version: "9.9.9" } },
+    });
+    await app.close();
+  });
+
+  test("fails closed when the active standard snapshot schema is invalid", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "office-runtime-invalid-standards-"));
+    temporaryDirectories.push(directory);
+    const standardsPath = join(directory, "standards.public.json");
+    const snapshot = JSON.parse(await readFile("data/standards.public.json", "utf8")) as { schema_version: string };
+    snapshot.schema_version = "unknown-standard-schema";
+    await writeFile(standardsPath, `${JSON.stringify(snapshot)}\n`, "utf8");
+
+    await expect(createRuntimeApp({
+      devicePepper: "runtime-device-pepper",
+      codePepper: "runtime-code-pepper",
+      recoveryPepper: "runtime-recovery-pepper",
+      standardsPath,
+    })).rejects.toThrow();
+  });
+
+  test("fails closed when the active standard snapshot does not match the catalog", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "office-runtime-mismatched-standards-"));
+    temporaryDirectories.push(directory);
+    const standardsPath = join(directory, "standards.public.json");
+    const snapshot = JSON.parse(await readFile("data/standards.public.json", "utf8")) as {
+      source_asset_count: number;
+      standards: Array<{ source_asset_count: number }>;
+    };
+    snapshot.source_asset_count -= 1;
+    if (!snapshot.standards[0] || snapshot.standards[0].source_asset_count <= 1) {
+      throw new Error("test fixture requires a standard backed by multiple assets");
+    }
+    snapshot.standards[0].source_asset_count -= 1;
+    await writeFile(standardsPath, `${JSON.stringify(snapshot)}\n`, "utf8");
+
+    await expect(createRuntimeApp({
+      devicePepper: "runtime-device-pepper",
+      codePepper: "runtime-code-pepper",
+      recoveryPepper: "runtime-recovery-pepper",
+      standardsPath,
+    })).rejects.toThrow("active standard snapshot does not match catalog asset count");
+  });
+
   test("reports object storage as configured when COS settings are present", async () => {
     const app = await createRuntimeApp({
       devicePepper: "runtime-device-pepper",

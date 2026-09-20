@@ -1,5 +1,8 @@
+import { z } from "zod";
+
 import {
   AssetStandardEngine,
+  BusinessStandardSchema,
   parseAssetsForStandards,
   type AssetForStandard,
   type BusinessStandard,
@@ -55,6 +58,51 @@ export interface StandardChangeRecord {
 export interface StandardPromotionResult {
   snapshot: StandardSnapshot;
   change_record: StandardChangeRecord;
+}
+
+const StandardEvolutionReportSchema = z.object({
+  schema_version: z.literal("office-standard-evolution/v1"),
+  base_version: z.string().regex(/^\d+\.\d+\.\d+$/u),
+  scanned_asset_count: z.number().int().nonnegative(),
+  candidates: z.array(z.object({
+    standard_id: z.string().min(1),
+    status: z.literal("candidate"),
+    source_public_ids: z.array(z.string().min(1)).min(1),
+    improvements: z.object({
+      fields: z.array(z.string().min(1)),
+      roles: z.array(z.string().min(1)),
+      variants: z.array(z.string().min(1)),
+    }).strict(),
+    proposed_standard: BusinessStandardSchema.optional(),
+    requires_review: z.literal(true),
+  }).strict()),
+  no_change: z.array(z.object({
+    public_id: z.string().min(1),
+    standard_id: z.string().min(1),
+    reason: z.literal("no stronger reusable rule"),
+  }).strict()),
+}).strict().superRefine((report, context) => {
+  const sourceIds = [
+    ...report.candidates.flatMap((candidate) => candidate.source_public_ids),
+    ...report.no_change.map((item) => item.public_id),
+  ];
+  if (sourceIds.length !== report.scanned_asset_count || new Set(sourceIds).size !== sourceIds.length) {
+    context.addIssue({ code: "custom", message: "evolution report source count must match unique scanned assets" });
+  }
+});
+
+export function parseStandardEvolutionReport(input: unknown): StandardEvolutionReport {
+  const parsed = StandardEvolutionReportSchema.parse(input);
+  return {
+    ...parsed,
+    candidates: parsed.candidates.map((candidate) => {
+      const { proposed_standard: proposedStandard, ...required } = candidate;
+      return {
+        ...required,
+        ...(proposedStandard === undefined ? {} : { proposed_standard: proposedStandard }),
+      };
+    }),
+  };
 }
 
 /** Scans assets into reviewable candidates; it never mutates the active snapshot. */

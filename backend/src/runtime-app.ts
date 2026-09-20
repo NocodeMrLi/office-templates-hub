@@ -25,10 +25,8 @@ import {
 } from "./domain/recovery-service.js";
 import { RedeemService, type CodeRecord, type CodeRepository } from "./domain/redeem-service.js";
 import { SearchService } from "./domain/search-service.js";
-import {
-  OfficeSpreadsheetEngine,
-  PUBLIC_STANDARD_VERSION,
-} from "./domain/office-spreadsheet-engine.js";
+import { parseStandardSnapshot } from "./domain/asset-standard-engine.js";
+import { OfficeSpreadsheetEngine } from "./domain/office-spreadsheet-engine.js";
 import { DocumentStoreCodeRepository } from "./infrastructure/document-store-code-repository.js";
 import { DocumentStoreDeviceRepository } from "./infrastructure/document-store-device-repository.js";
 import { DocumentStoreDownloadEventRepository } from "./infrastructure/document-store-download-event-repository.js";
@@ -62,6 +60,7 @@ import type { DocumentStoreRegistrationResultCollection } from "./infrastructure
 
 export interface RuntimeAppOptions {
   catalogPath?: string;
+  standardsPath?: string;
   devicePepper: string;
   codePepper: string;
   recoveryPepper: string;
@@ -120,6 +119,7 @@ interface CatalogSource {
 
 export async function createRuntimeApp(options: RuntimeAppOptions) {
   const catalogSource = readCatalog(options.catalogPath);
+  const standardSnapshot = readStandardSnapshot(options.standardsPath);
   const repositories = options.repositories ?? (options.postgres
     ? createRuntimeRepositoriesForPostgres(options.postgres.client ?? createPostgresClient(options.postgres))
     : options.cloudbase
@@ -147,7 +147,7 @@ export async function createRuntimeApp(options: RuntimeAppOptions) {
     registrationResults: repositories.registrationResults,
     catalogService,
     searchService: new SearchService(catalogSource.items),
-    spreadsheetEngine: OfficeSpreadsheetEngine.fromAssets(catalogSource.items, PUBLIC_STANDARD_VERSION),
+    spreadsheetEngine: OfficeSpreadsheetEngine.fromSnapshot(catalogSource.items, standardSnapshot),
     downloadService: new DownloadService({
       authenticator: {
         authenticate: async (deviceId, secret) => {
@@ -354,6 +354,12 @@ function createCosClient(secretId: string, secretKey: string): CosGetObjectUrlCl
 
 function readCatalog(path = fileURLToPath(new URL("../../data/catalog.public.json", import.meta.url))): CatalogSource {
   return JSON.parse(readFileSync(path, "utf8")) as CatalogSource;
+}
+
+function readStandardSnapshot(
+  path = fileURLToPath(new URL("../../data/standards.public.json", import.meta.url)),
+) {
+  return parseStandardSnapshot(JSON.parse(readFileSync(path, "utf8")) as unknown);
 }
 
 class InMemoryDeviceRepository implements DeviceRepository {

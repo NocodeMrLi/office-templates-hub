@@ -24,7 +24,8 @@ Personal users receive the complete public capability free of charge. Enterprise
 - one `OfficeSpreadsheetEngine` handles exact delivery, applicable-asset adaptation, standard generation, clarification, labelled drafts, and refusal;
 - `POST /api/spreadsheets/resolve` and the local `skill/SKILL.md` entry call that same engine;
 - deterministic XLSX rendering and quality checks cover required fields, duplicate columns, workflow, formula safety, print settings, and Excel/WPS/LibreOffice compatibility targets;
-- new-asset standard scanning produces limited-dimension review candidates or `no_change` records; the tested domain service requires approval, regression success, and a rollback version, but persistent promotion/rollback tooling is not implemented yet;
+- HTTP runtime and the local Skill load the same schema-validated active standard snapshot and fail closed when it is invalid or does not match the catalog;
+- new-asset standard scanning produces limited-dimension review candidates or `no_change` records; persistent promotion writes immutable versions and a change record before atomically activating the new snapshot, and rollback is audited;
 - PostgreSQL/CloudBase repositories, COS signing, migrations, imports, production build/smoke, public scan, and deployment preflight remain available.
 
 **Cloud data verified:** PostgreSQL contains 1319 active public-scope template records with 1319 distinct public IDs, and all 1319 COS objects currently match the private manifest by content size and SHA.
@@ -42,13 +43,17 @@ pnpm install
 pnpm verify
 ```
 
-Rebuild the current `1.0.0` baseline only when intentionally checking snapshot reproducibility:
+Verify that the active snapshot matches the public catalog:
 
 ```bash
-pnpm standards:build
+pnpm standards:verify-active
 ```
 
-That command currently targets the fixed `1.0.0` baseline. It is not a release command for `1.0.1` or later and must not be used to overwrite a promoted snapshot. Runtime snapshot loading, parameterized candidate builds, persistent promotion/rollback, and generated documentation synchronization are the first C01-A engineering task.
+Build an explicitly versioned candidate without overwriting the active snapshot:
+
+```bash
+pnpm standards:build -- --version 1.0.1 --output /tmp/standards.candidate.json
+```
 
 Resolve a local Skill request:
 
@@ -62,7 +67,35 @@ Scan newly admitted assets against the active standard snapshot:
 pnpm standards:scan -- data/standards.public.json new-assets.json evolution-report.json
 ```
 
-A scan never publishes a standard. `StandardEvolutionService` currently provides the tested in-memory gate only; no persistent promotion command exists. Do not claim or perform a new standard release until C01-A adds the documented build, promotion, rollback, and synchronization commands.
+A scan never publishes a standard. After human approval and successful regression, use the controlled commands below; replace angle-bracket values with reviewed local paths/identifiers:
+
+```bash
+EVOLUTION_REPORT=/absolute/path/evolution-report.json
+FORMAL_STANDARD_DOC=/absolute/path/public-standard-document.md
+REVIEWER_ID=reviewer-id
+CURRENT_VERSION=1.0.0
+
+pnpm standards:promote -- \
+  --active data/standards.public.json \
+  --history data/standards-history \
+  --report "$EVOLUTION_REPORT" \
+  --approved-by "$REVIEWER_ID" \
+  --regression-passed true \
+  --rollback-version "$CURRENT_VERSION"
+
+pnpm standards:docs:sync -- \
+  --snapshot data/standards.public.json \
+  --document "$FORMAL_STANDARD_DOC"
+
+pnpm standards:rollback -- \
+  --active data/standards.public.json \
+  --history data/standards-history \
+  --target-version "$CURRENT_VERSION" \
+  --approved-by "$REVIEWER_ID" \
+  --reason "reviewed rollback reason"
+```
+
+C01-A is locally implemented and verified, including a temporary `1.0.0 → 1.0.1 → 1.0.0` drill. This does not mean the service is deployed or online.
 
 Copy `.env.example` only as a variable-name template. Never commit or print real database credentials, connection strings, SecretKey values, API keys, plaintext redemption/recovery codes, signed URLs, private import files, or `.xlsx` assets.
 

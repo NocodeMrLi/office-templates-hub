@@ -26,28 +26,68 @@ export function parseAssetsForStandards(assets: readonly unknown[]): AssetForSta
   return assets.map((asset) => AssetForStandardSchema.parse(asset));
 }
 
-export interface BusinessStandard {
-  standard_id: string;
-  intent: string;
-  intent_name: string;
-  industry: string;
-  required_fields: string[];
-  recommended_fields: string[];
-  roles: string[];
-  variants: string[];
-  project_phases: string[];
-  purposes: string[];
-  outputs: string[];
-  regulated: boolean;
-  compliance_reviews: string[];
-  source_asset_count: number;
-}
+const NonEmptyStringArraySchema = z.array(z.string().min(1));
 
-export interface StandardSnapshot {
-  schema_version: "office-asset-standards/v1";
-  version: string;
-  source_asset_count: number;
-  standards: BusinessStandard[];
+export const BusinessStandardSchema = z.object({
+  standard_id: z.string().min(1),
+  intent: z.string().min(1),
+  intent_name: z.string().min(1),
+  industry: z.string().min(1),
+  required_fields: NonEmptyStringArraySchema,
+  recommended_fields: NonEmptyStringArraySchema,
+  roles: NonEmptyStringArraySchema,
+  variants: NonEmptyStringArraySchema,
+  project_phases: NonEmptyStringArraySchema,
+  purposes: NonEmptyStringArraySchema,
+  outputs: NonEmptyStringArraySchema,
+  regulated: z.boolean(),
+  compliance_reviews: NonEmptyStringArraySchema,
+  source_asset_count: z.number().int().positive(),
+}).strict().superRefine((standard, context) => {
+  if (standard.standard_id !== standardId(standard.intent, standard.industry)) {
+    context.addIssue({ code: "custom", message: "standard id does not match intent and industry" });
+  }
+  const recommended = new Set(standard.recommended_fields);
+  if (standard.required_fields.some((field) => !recommended.has(field))) {
+    context.addIssue({ code: "custom", message: "required fields must be recommended" });
+  }
+  for (const [name, values] of Object.entries({
+    required_fields: standard.required_fields,
+    recommended_fields: standard.recommended_fields,
+    roles: standard.roles,
+    variants: standard.variants,
+    project_phases: standard.project_phases,
+    purposes: standard.purposes,
+    outputs: standard.outputs,
+    compliance_reviews: standard.compliance_reviews,
+  })) {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({ code: "custom", message: `${name} must not contain duplicates` });
+    }
+  }
+});
+
+const StandardSnapshotSchema = z.object({
+  schema_version: z.literal("office-asset-standards/v1"),
+  version: z.string().regex(/^\d+\.\d+\.\d+$/u, "standard version must be semantic"),
+  source_asset_count: z.number().int().nonnegative(),
+  standards: z.array(BusinessStandardSchema),
+}).strict().superRefine((snapshot, context) => {
+  const ids = snapshot.standards.map((standard) => standard.standard_id);
+  if (new Set(ids).size !== ids.length) {
+    context.addIssue({ code: "custom", message: "standard ids must be unique" });
+  }
+  const countedAssets = snapshot.standards.reduce((sum, standard) => sum + standard.source_asset_count, 0);
+  if (countedAssets !== snapshot.source_asset_count) {
+    context.addIssue({ code: "custom", message: "standard source counts must equal snapshot source count" });
+  }
+});
+
+export type BusinessStandard = z.infer<typeof BusinessStandardSchema>;
+export type StandardSnapshot = z.infer<typeof StandardSnapshotSchema>;
+
+export function parseStandardSnapshot(input: unknown): StandardSnapshot {
+  return StandardSnapshotSchema.parse(input);
 }
 
 export class AssetStandardEngine {
@@ -84,6 +124,10 @@ export class AssetStandardEngine {
       source_asset_count: parsed.length,
       standards,
     });
+  }
+
+  static fromSnapshot(snapshot: unknown): AssetStandardEngine {
+    return new AssetStandardEngine(parseStandardSnapshot(snapshot));
   }
 
   snapshot(): StandardSnapshot {
