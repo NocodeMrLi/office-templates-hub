@@ -4,7 +4,8 @@ This runbook covers the next deployment of the public office-spreadsheet core. I
 
 ## Current evidence boundary (2026-09-20)
 
-- Local Skill, public-free catalog/download semantics, shared standards engine, resolve API, XLSX rendering, quality gate, and standard-evolution gate are implemented and locally verified.
+- Local Skill, public-free catalog/download semantics, shared standards engine, resolve API, XLSX rendering, quality gate, and limited-dimension standard-evolution core are implemented and locally verified.
+- C01-A is not implemented: runtime/Skill still rebuild the fixed `1.0.0` standard from the catalog instead of loading one activated snapshot, and persistent promotion/rollback plus generated documentation synchronization are absent. Complete C01-A before this deployment runbook.
 - CloudBase PostgreSQL has 1319 active, distinct, public-scope template records; missing scope and invalid object paths are 0.
 - COS content verification passed for 1319/1319 objects by read-only object size and SHA. The current credential cannot call `HeadObject`, so the verifier correctly falls back to read-only `GetObject`; a 403 is not reported as a missing object.
 - No CloudBase runtime service is deployed. No online API, signed-download, or user end-to-end verification exists. The product is not online.
@@ -25,11 +26,12 @@ Partial COS configuration fails closed. Complete secret values must never enter 
 
 ## Candidate preflight
 
+Prerequisite: C01-A has passed, so HTTP runtime and Skill resolve the same validated active snapshot and the standard release toolchain has its own tests. Until then, this runbook is an execution plan, not proof that the deployment candidate is ready.
+
 From a clean checkout of the exact candidate commit:
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm standards:build
 pnpm verify
 pnpm tsx scripts/deployment-preflight.ts \
   --commit-sha "$(git rev-parse HEAD)" \
@@ -39,7 +41,7 @@ pnpm tsx scripts/deployment-preflight.ts \
   --env-example .env.example
 ```
 
-Expected: all tests/build/smoke/public scan pass; the regenerated standard snapshot has 1319 source assets and 263 standards; import artifacts and checksums match; `.env.example` contains placeholders only. A missing local Docker engine is a documented warning, not proof of an image build.
+Expected: all tests/build/smoke/public scan pass; C01-A's active-snapshot consistency check confirms 1319 source assets, 263 standards and version `1.0.0` for the current candidate; import artifacts and checksums match; `.env.example` contains placeholders only. A missing local Docker engine is a documented warning, not proof of an image build.
 
 ## Deployment sequence
 

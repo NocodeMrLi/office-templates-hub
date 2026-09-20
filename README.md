@@ -24,7 +24,7 @@ Personal users receive the complete public capability free of charge. Enterprise
 - one `OfficeSpreadsheetEngine` handles exact delivery, applicable-asset adaptation, standard generation, clarification, labelled drafts, and refusal;
 - `POST /api/spreadsheets/resolve` and the local `skill/SKILL.md` entry call that same engine;
 - deterministic XLSX rendering and quality checks cover required fields, duplicate columns, workflow, formula safety, print settings, and Excel/WPS/LibreOffice compatibility targets;
-- new-asset standard scanning produces review candidates or `no_change` records; promotion requires approval, regression success, and a rollback version;
+- new-asset standard scanning produces limited-dimension review candidates or `no_change` records; the tested domain service requires approval, regression success, and a rollback version, but persistent promotion/rollback tooling is not implemented yet;
 - PostgreSQL/CloudBase repositories, COS signing, migrations, imports, production build/smoke, public scan, and deployment preflight remain available.
 
 **Cloud data verified:** PostgreSQL contains 1319 active public-scope template records with 1319 distinct public IDs, and all 1319 COS objects currently match the private manifest by content size and SHA.
@@ -39,9 +39,16 @@ Requires Node.js 22+ and pnpm 11.19.0.
 
 ```bash
 pnpm install
-pnpm standards:build
 pnpm verify
 ```
+
+Rebuild the current `1.0.0` baseline only when intentionally checking snapshot reproducibility:
+
+```bash
+pnpm standards:build
+```
+
+That command currently targets the fixed `1.0.0` baseline. It is not a release command for `1.0.1` or later and must not be used to overwrite a promoted snapshot. Runtime snapshot loading, parameterized candidate builds, persistent promotion/rollback, and generated documentation synchronization are the first C01-A engineering task.
 
 Resolve a local Skill request:
 
@@ -55,7 +62,7 @@ Scan newly admitted assets against the active standard snapshot:
 pnpm standards:scan -- data/standards.public.json new-assets.json evolution-report.json
 ```
 
-A scan never publishes a standard. Candidate promotion must pass the review, regression, and rollback controls implemented by `StandardEvolutionService`.
+A scan never publishes a standard. `StandardEvolutionService` currently provides the tested in-memory gate only; no persistent promotion command exists. Do not claim or perform a new standard release until C01-A adds the documented build, promotion, rollback, and synchronization commands.
 
 Copy `.env.example` only as a variable-name template. Never commit or print real database credentials, connection strings, SecretKey values, API keys, plaintext redemption/recovery codes, signed URLs, private import files, or `.xlsx` assets.
 
